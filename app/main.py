@@ -1,0 +1,187 @@
+"""
+ai-debug-mcp — 基于 MCP 协议的 AI 智能调试服务
+"""
+import logging
+
+import uvicorn
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+from app.config import settings
+from app.utils.logging import setup_logging
+from app.middleware import setup_middleware
+from app.error_handlers import setup_error_handlers
+from app.observability import setup_observability
+from app.mcp.core.logs import create_request_id, add_log, get_logs
+from app.mcp.builders.context import build_context
+from app.api.debug import router as debug_router
+from app.api.mcp_routes import router as mcp_router
+
+# ── 注册 MCP 工具 ──
+from app.mcp.tools import register_all_tools
+
+register_all_tools()
+
+logger = logging.getLogger("ai-debug-mcp")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    setup_logging()
+    logger.info(
+        f"服务启动 | {settings.service_name} v0.2.0 | "
+        f"storage={settings.storage_backend} | "
+        f"llm={settings.llm_model} | "
+        f"auth={'on' if settings.api_key else 'off'} | "
+        f"rate_limit={settings.rate_limit_per_minute}/min"
+    )
+
+    if not settings.api_key:
+        logger.warning(
+            "未配置 API_KEY，服务以【免鉴权】模式运行。"
+            "生产环境请通过环境变量 API_KEY 设置访问令牌，避免未授权访问。"
+        )
+
+    # 启动定时清理任务
+    import asyncio
+    from app.mcp.core.storage.factory import get_trace_store, get_session_store
+
+    async def periodic_cleanup():
+        while True:
+            await asyncio.sleep(300)
+            try:
+                get_trace_store().cleanup_expired(settings.trace_ttl_seconds)
+                get_session_store().cleanup_expired(settings.session_ttl_seconds)
+                from app.mcp.transports.session import registry as mcp_registry
+                mcp_registry.cleanup(ttl_seconds=1800)
+            except Exception:
+                logger.exception("定时清理失败")
+
+    task = asyncio.create_task(periodic_cleanup())
+    yield
+    task.cancel()
+
+    # 优雅关闭：关闭 PG 连接池
+    if settings.storage_backend == "postgresql":
+        try:
+            from app.mcp.core.storage.pg_store import close_pool
+            close_pool()
+        except Exception as e:
+            logger.warning(f"关闭 PG 连接池失败: {e}")
+
+    logger.info("服务已停止")
+
+
+app = FastAPI(
+    title=settings.service_name,
+    description="基于 MCP 协议的 AI 智能调试服务",
+    version="0.2.0",
+    lifespan=lifespan,
+)
+
+# 中间件
+setup_middleware(app)
+
+# 全局异常兜底
+setup_error_handlers(app)
+
+# 可观测性（/metrics）
+setup_observability(app)
+
+# 路由
+app.include_router(debug_router)
+app.include_router(mcp_router)
+
+
+@app.get("/")
+@app.get("/health")
+def health():
+    """增强健康检查 —— 包含存储层可用性验证"""
+    llm_ok = bool(settings.openai_api_key)
+
+    # 检查存储层
+    storage_ok = True
+    storage_detail = settings.storage_backend
+    if settings.storage_backend == "postgresql":
+        try:
+            from app.mcp.core.storage.pg_store import _get_pool
+            pool = _get_pool()
+            conn = pool.getconn()
+            conn.execute("SELECT 1")
+            pool.putconn(conn)
+            storage_detail = "postgresql (connected)"
+        except Exception:
+            storage_ok = False
+            storage_detail = "postgresql (disconnected)"
+
+    # 综合状态
+    if llm_ok and storage_ok:
+        status = "ok"
+    elif not llm_ok and not storage_ok:
+        status = "unhealthy"
+    else:
+        status = "degraded"
+
+    return {
+        "status": status,
+        "service": settings.service_name,
+        "version": "0.2.0",
+        "storage": storage_detail,
+        "llm_configured": llm_ok,
+    }
+
+
+@app.post("/debug")
+def debug(req: dict):
+    """便捷调试入口"""
+    request_id = create_request_id()
+
+    try:
+        add_log(request_id, "request_start", req)
+        add_log(request_id, "processing")
+        result = {"echo": req}
+        add_log(request_id, "response_ready", result)
+    except Exception as e:
+        logger.exception(f"/debug 日志记录失败")
+        return {
+            "request_id": request_id,
+            "result": {"status": "error", "message": str(e)},
+            "trace": [],
+            "context": {"request_id": request_id, "flow": [], "input": None, "output": None, "errors": [str(e)]},
+        }
+
+    try:
+        trace = get_logs(request_id)
+        context = build_context(request_id, trace)
+    except Exception as e:
+        logger.exception(f"/debug 构建上下文失败")
+        return {
+            "request_id": request_id,
+            "result": result,
+            "trace": [],
+            "context": {"request_id": request_id, "flow": [], "input": None, "output": None, "errors": [str(e)]},
+        }
+
+    return {
+        "request_id": request_id,
+        "result": result,
+        "trace": trace,
+        "context": context,
+    }
+
+
+if __name__ == "__main__":
+    import sys
+
+    # python -m app.main --stdio  → 以 stdio 传输运行（供 Claude Desktop 等本地客户端）
+    if "--stdio" in sys.argv:
+        from app.mcp.transports.stdio import run_stdio
+        run_stdio()
+    else:
+        uvicorn.run(
+            "app.main:app",
+            host=settings.host,
+            port=settings.port,
+            reload=settings.debug,
+        )

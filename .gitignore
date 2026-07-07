@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# 环境变量 / 密钥（切勿提交）
+.env
+.env.*
+
+# 测试与缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 本地产物
+*.log
+test_result.txt
+test_api_result.txt
+t.txt
+
+# IDE 内部数据（非项目源码）
+.codebuddy/

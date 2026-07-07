@@ -1,0 +1,45 @@
+{
+  "request_id": "demo-request-uuid",
+  "trace": [
+    {
+      "timestamp": 1720345200.123,
+      "step": "request_start",
+      "data": {"operation": "create_user", "username": "test_user"}
+    },
+    {
+      "timestamp": 1720345200.156,
+      "step": "processing",
+      "data": {"step": "validate_input"}
+    },
+    {
+      "timestamp": 1720345200.201,
+      "step": "processing",
+      "data": {"step": "check_duplicate"}
+    },
+    {
+      "timestamp": 1720345200.345,
+      "step": "error",
+      "data": "IntegrityError: duplicate key value violates unique constraint"
+    }
+  ],
+  "context": {
+    "request_id": "demo-request-uuid",
+    "flow": ["request_start", "processing", "processing", "error"],
+    "input": {"operation": "create_user", "username": "test_user"},
+    "output": null,
+    "errors": ["IntegrityError: duplicate key value violates unique constraint"]
+  },
+  "exception": {
+    "type": "IntegrityError",
+    "message": "duplicate key value violates unique constraint",
+    "frames": [
+      {
+        "file": "/app/services/user.py",
+        "line": 42,
+        "function": "create_user",
+        "code": "db.session.commit()",
+        "locals": {"username": "test_user"}
+      }
+    ]
+  }
+}
