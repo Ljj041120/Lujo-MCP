@@ -31,3 +31,6 @@ t.txt
 
 # IDE 内部数据（非项目源码）
 .codebuddy/
+
+# 参考项目（已迁移完毕，不再依赖，不纳入仓库）
+reference/
