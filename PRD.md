@@ -23,6 +23,8 @@
 | v1.0 | 2026-07-07 | 团队 | 首版 PRD |
 | v2.0 | 2026-07-07 | 团队 | 以真实痛点重构，新增 FR11–FR15 |
 | v3.0 | 2026-07-07 | 高级架构师 | **代码核实后修正实现状态**：标注自动捕获/宿主AI推理已落地；代码定位标记为"模块已实现但未接线+配置缺失"；静默失败/前端自动化确认为待开发；补充架构师痛点覆盖度矩阵与落地缺口 |
+| v4.0 | 2026-07-08 | 高级后端架构师 | **参考项目迁移完成（M1–M8）**：redaction/trace_repo/network/ui_event/git/silent_failure/ingest_error/build_debug_context 全部落地；6 个新工具双传输注册；FR13 采集链就绪（自动检测仍待建）；FR14/FR15 未纳入本次优先级 |
+| v4.1 | 2026-07-08 | 高级后端架构师 | **补迁好用特性（M9–M10）**：规范驱动采集+注入（FR15 采集链就绪）、指纹去重+occurrence_count 聚合；评估后不搬 tenacity/浏览器SDK/Playwright（不好用或不适用） |
 
 ---
 
@@ -176,11 +178,12 @@
 - **说明**：本产品**不**生成"给人类复制的提示词文本"，而是把清洗好的结构化上下文直接交给宿主 AI 推理（见 `mcp_server.py` 设计原则与 `analyze_with_llm` 可选工具）。这从架构上消解了 P2「手写规范提示词」——开发者无需整理格式。
 - **可选增强（🔲）**：增加 `GET /api/debug/prompt` 返回纯文本提示词，便于非 MCP 场景一键复制。
 
-#### FR13 静默失败检测（Silent Failure Detection）（P0）🔲 待开发 —— 解决 P5/P6
+#### FR13 静默失败检测（Silent Failure Detection）（P0）⚠️ 采集链已就绪（M6），自动检测待建 —— 解决 P5/P6
 
 - **目标**：无异常、API 200 时，依规范识别"行为不符预期"。
-- **功能点**：规范建模（`{endpoint,input,expect:{status,body_rules,side_effects}}`）；`assert_behavior(actual, spec)` 输出 `{matched,diffs[]}`；`matched==false` 且无异常/无 4xx5xx → 标记 `silent_failure`；交 LLM 推断根因（事件未绑定/状态未更新/分支错误）。
-- **验收**：构造"200 但字段缺失/值错"请求，`verify` 输出 `silent_failure` 而非误判成功。
+- **已落地（M6）**：`ingest_silent_failure` 工具 + `/ingest/silent-failure` 路由，接收浏览器 SDK 上报的 UI 事件链 + 网络链 + 期望行为，以 `trace_kind="silent_failure"` 关联入库；`build_debug_context` 自动注入 `ui_events`/`network_trace`（M8a）。
+- **待建**：`assert_behavior` 自动断言引擎 + `verify` 工具 + LLM 根因推断（当前为用户/SDK 显式标记，非自动检测）。
+- **验收**：ingest 路径 ✅（M6 单测验证）；"200 但字段缺失 → `verify` 自动判 `silent_failure`" 🔲（自动检测未建）。
 
 #### FR14 规范驱动前端自动化验证（P1）🔲 待开发 —— 解决 P4
 
@@ -188,11 +191,32 @@
 - **功能点**：规范入口（元素/动作/期望状态）；对接 Playwright 自动点击/输入；`无响应且无报错` → 静默失败；输出 `{page,interactions[]}`。
 - **验收**：含"按钮无反应"的规范，自动遍历并报告为 `silent_failure`。
 
-#### FR15 规范驱动开发闭环（SDD 主线）（P0）🔲 待开发 —— 统辖 P4/P5/P6
+#### FR15 规范驱动开发闭环（SDD 主线）（P0）⚠️ 采集+注入已就绪（M9），verify/持续校验待建 —— 统辖 P4/P5/P6
 
 - **目标**：规范作为一等公民，从"等报错"升级为"持续比对规范校验"。
-- **功能点**：`specs` 存储（api/ui/rule 三类）；持续校验模式；统一诊断 `{errors[],silent_failures[],code_locations[],spec_diffs[],analysis}`；新增 MCP 工具 `spec`/`verify`/`prompt`。
-- **验收**：定义规范后，后续同类请求自动校验，偏离即告警（即使无传统错误）。
+- **已落地（M9）**：`collectors/spec.py` 扫描项目规范文件（CONVENTION/API_SPEC/README/.cursorrules 等）→ 按扩展名+关键词标签匹配 → 缓存+脱敏；`get_related_specs` 工具 + `build_debug_context` 自动注入 `related_specs`（前3帧、按规范文件去重、限长 ~6000 字符）。
+- **待建**：`specs` 存储 CRUD、`verify` 自动断言工具、持续校验模式、`spec_diffs` 统一诊断。
+- **验收**：`get_related_specs` 返回相关规范 ✅（M9 单测验证）；"定义规范后自动校验偏离即告警" 🔲（verify 未建）。
+
+### 7.3 迁移增量（参考项目迁移，M1–M10 已完成）✅
+
+| 能力 | 模块 | 状态 |
+| --- | --- | --- |
+| 敏感信息脱敏 | `core/redaction.py`（存储边界统一脱敏） | ✅ |
+| 统一 trace 存取 | `core/trace_repo.py`（复用 TraceStorage，零存储改动） | ✅ |
+| 网络请求采集 | `collectors/network.py` + `ingest_network`/`get_network_trace` | ✅ |
+| UI 事件采集 | `collectors/ui_event.py` | ✅ |
+| Git 归因 | `core/git.py` + `get_blame_for_frame`/`get_recent_diff`（白名单+超时） | ✅ |
+| 静默失败采集 | `tools/silent_failure_api.py` + `/ingest/silent-failure` | ✅ |
+| 跨语言错误上报 | `tools/ingest_api.py` + `/ingest/error` | ✅ |
+| inbound 请求采集 | `middleware_network.py`（默认关闭，安全栈内层） | ✅ |
+| 完整调试上下文 | `builders/context.build_debug_context`（注入 code/git/network/ui/runtime） | ✅ |
+| 规范驱动采集 | `collectors/spec.py` + `tools/spec_api.py`（扫描/标签匹配/缓存/脱敏） | ✅ |
+| 规范注入上下文 | `build_debug_context` 注入 `related_specs`（前3帧去重限长） | ✅ |
+| 指纹去重聚合 | `core/errors.py` compute_fingerprint + occurrence_count（避免重复刷屏） | ✅ |
+| 双传输工具注册 | HTTP 11 工具 + stdio 13 工具 | ✅ |
+
+> **未迁移（评估为不适用/不好用/未纳入）**：Playwright 自动遍历（FR14，前端自动化，未建）；浏览器 SDK TS 文件（前端制品，后端 ingest 已就绪待对接）；proj2 的 tenacity 重试/`AnalyzerUnavailableError`（proj1 已有等效重试+fallback，引入为多余依赖）；FR15 的 `verify` 自动断言/spec 存储（待后续）。
 
 ---
 
@@ -426,7 +450,7 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | 报错查日志丢给 AI，时间在找代码文件 | P1 | ✅ 已落地（代码定位+源码片段+IDE 链接） | AC9/AC10 |
 | 时间在书写规范（提示词） | P2 | ✅ 宿主 AI 推理模式已解决 | AC1/AC2 |
-| 不能一个个点前端 UI，繁琐 | P4 | ❌ 待开发 | AC12 |
-| 点了没反应、无代码错误 | P5 | ❌ 待开发（静默失败检测） | AC11 |
-| AI 说语法/接口没问题但实则有问题 | P6 | ❌ 待开发 | AC11/AC13 |
+| 不能一个个点前端 UI，繁琐 | P4 | ❌ 待开发（FR14 Playwright 未建） | AC12 |
+| 点了没反应、无代码错误 | P5 | ⚠️ 后端采集链已就绪（M6），自动检测待建 | AC11 |
+| AI 说语法/接口没问题但实则有问题 | P6 | ⚠️ 采集+上下文注入已就绪，规范断言待建 | AC11/AC13 |
 | 手动查日志繁琐 | P3 | ✅ 全局异常钩子自动捕获 | AC2 |

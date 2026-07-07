@@ -16,6 +16,7 @@ from app.mcp.core.logs import create_request_id, add_log, get_logs
 from app.mcp.builders.context import build_context
 from app.api.debug import router as debug_router
 from app.api.mcp_routes import router as mcp_router
+from app.api.ingest import router as ingest_router
 
 # ── 注册 MCP 工具 ──
 from app.mcp.tools import register_all_tools
@@ -81,6 +82,9 @@ app = FastAPI(
 )
 
 # 中间件
+# NetworkCapture 先于安全栈添加 → 位于最内层，仅记录已通过鉴权/限流/体积限制的请求
+from app.middleware_network import NetworkCaptureMiddleware  # noqa: E402
+app.add_middleware(NetworkCaptureMiddleware)
 setup_middleware(app)
 
 # 全局异常兜底
@@ -92,6 +96,7 @@ setup_observability(app)
 # 路由
 app.include_router(debug_router)
 app.include_router(mcp_router)
+app.include_router(ingest_router)
 
 
 @app.get("/")
