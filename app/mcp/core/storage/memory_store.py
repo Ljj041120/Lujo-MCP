@@ -1,0 +1,79 @@
+"""线程安全的内存存储 —— 加锁防并发崩溃"""
+
+import time
+import threading
+from collections import defaultdict
+from typing import Any, Optional
+
+from app.mcp.core.storage.base import TraceStorage, SessionStorage
+
+
+class MemoryTraceStore(TraceStorage):
+    def __init__(self):
+        self._store: dict[str, list[dict]] = defaultdict(list)
+        self._lock = threading.Lock()
+
+    def save_entry(self, request_id: str, entry: dict) -> None:
+        with self._lock:
+            self._store[request_id].append(entry)
+
+    def get_entries(self, request_id: str) -> list[dict]:
+        with self._lock:
+            return self._store.get(request_id, []).copy()
+
+    def delete(self, request_id: str) -> None:
+        with self._lock:
+            self._store.pop(request_id, None)
+
+    def cleanup_expired(self, ttl_seconds: int) -> int:
+        now = time.time()
+        with self._lock:
+            stale = [
+                rid for rid, entries in self._store.items()
+                if entries and now - entries[-1]["timestamp"] > ttl_seconds
+            ]
+            for rid in stale:
+                del self._store[rid]
+        return len(stale)
+
+
+class MemorySessionStore(SessionStorage):
+    def __init__(self):
+        self._store: dict[str, dict] = {}
+        self._lock = threading.Lock()
+
+    def save(self, session_id: str, data: dict) -> None:
+        data["last_active"] = time.time()
+        with self._lock:
+            self._store[session_id] = data.copy()
+
+    def get(self, session_id: str) -> Optional[dict]:
+        with self._lock:
+            s = self._store.get(session_id)
+            if s:
+                s["last_active"] = time.time()
+                return s.copy()
+        return None
+
+    def delete(self, session_id: str) -> None:
+        with self._lock:
+            self._store.pop(session_id, None)
+
+    def list_active(self, ttl_seconds: int) -> list[dict]:
+        now = time.time()
+        with self._lock:
+            return [
+                s.copy() for s in self._store.values()
+                if now - s.get("last_active", 0) < ttl_seconds
+            ]
+
+    def cleanup_expired(self, ttl_seconds: int) -> int:
+        now = time.time()
+        with self._lock:
+            stale = [
+                sid for sid, s in self._store.items()
+                if now - s.get("last_active", 0) > ttl_seconds
+            ]
+            for sid in stale:
+                del self._store[sid]
+        return len(stale)

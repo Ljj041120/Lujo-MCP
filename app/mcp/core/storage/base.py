@@ -1,0 +1,49 @@
+"""存储抽象层 —— 定义统一接口"""
+
+from abc import ABC, abstractmethod
+from typing import Any, Optional
+
+
+class TraceStorage(ABC):
+    """追踪日志存储的抽象接口"""
+
+    @abstractmethod
+    def save_entry(self, request_id: str, entry: dict) -> None:
+        ...
+
+    @abstractmethod
+    def get_entries(self, request_id: str) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def delete(self, request_id: str) -> None:
+        ...
+
+    @abstractmethod
+    def cleanup_expired(self, ttl_seconds: int) -> int:
+        """清理过期条目，返回清理数量"""
+        ...
+
+
+class SessionStorage(ABC):
+    """会话存储的抽象接口"""
+
+    @abstractmethod
+    def save(self, session_id: str, data: dict) -> None:
+        ...
+
+    @abstractmethod
+    def get(self, session_id: str) -> Optional[dict]:
+        ...
+
+    @abstractmethod
+    def delete(self, session_id: str) -> None:
+        ...
+
+    @abstractmethod
+    def list_active(self, ttl_seconds: int) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def cleanup_expired(self, ttl_seconds: int) -> int:
+        ...

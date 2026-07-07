@@ -1,0 +1,181 @@
+"""调试相关 API 路由"""
+
+import logging
+
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+import json
+
+from app.mcp.core.logs import create_request_id, add_log, get_logs
+from app.mcp.core.session import session_manager
+from app.mcp.builders.context import build_context
+from app.mcp.collectors.runtime import collect_runtime_snapshot
+from app.mcp.collectors.stacktrace import capture_exception, format_trace_for_ai
+from app.llm.analyzer import analyze, analyze_stream
+from app.schemas import DebugRequest, AnalyzeRequest, DebugResponse, DebugContext
+
+logger = logging.getLogger("ai-debug-mcp.api")
+
+router = APIRouter(prefix="/api/debug", tags=["debug"])
+
+
+@router.post("/run")
+def debug_run(req: DebugRequest) -> DebugResponse:
+    """执行调试流程：记录请求 → 处理 → 构建上下文"""
+    request_id = create_request_id()
+
+    try:
+        add_log(request_id, "request_start", req.payload)
+    except Exception as e:
+        logger.exception("add_log 失败")
+        raise HTTPException(status_code=500, detail=f"日志记录失败: {e}")
+
+    error_info = None
+    try:
+        add_log(request_id, "processing", {"metadata": req.metadata})
+        result = {"echo": req.payload, "status": "success"}
+        add_log(request_id, "response_ready", result)
+    except Exception as e:
+        error_info = capture_exception(e)
+        try:
+            # 把完整异常（含堆栈帧）写入 trace，使 context/analyze 可检索
+            add_log(request_id, "error", error_info)
+        except Exception:
+            pass
+        result = {"status": "error", "message": str(e)}
+
+    try:
+        trace = get_logs(request_id)
+        context = build_context(request_id, trace)
+    except Exception as e:
+        logger.exception("构建上下文失败")
+        raise HTTPException(status_code=500, detail=f"构建上下文失败: {e}")
+
+    if error_info:
+        try:
+            # 保留完整异常（含 frames），供 LLM 分析与源码片段使用
+            context["exception"] = error_info
+            # FR11：附加报错行源码片段
+            if error_info.get("frames"):
+                from app.mcp.collectors.code_locator import get_snippets_for_frames
+                context["code_snippets"] = [
+                    s.model_dump() for s in get_snippets_for_frames(error_info["frames"])
+                ]
+        except Exception:
+            context["exception"] = {"type": "Unknown", "message": str(error_info)}
+
+    return DebugResponse(
+        request_id=request_id,
+        result=result,
+        trace=trace,
+        context=context,
+    )
+
+
+@router.post("/analyze")
+def debug_analyze(req: AnalyzeRequest):
+    """对指定请求进行 LLM 分析"""
+    try:
+        trace = get_logs(req.request_id)
+    except Exception as e:
+        logger.exception("获取追踪日志失败")
+        raise HTTPException(status_code=500, detail=f"获取日志失败: {e}")
+
+    if not trace:
+        raise HTTPException(status_code=404, detail=f"找不到请求 {req.request_id}")
+
+    try:
+        context = build_context(req.request_id, trace)
+    except Exception as e:
+        logger.exception("构建上下文失败")
+        raise HTTPException(status_code=500, detail=f"构建上下文失败: {e}")
+
+    # 若 errors 中含堆栈帧，提升到 exception（供 LLM 分析）
+    for err in context.get("errors", []):
+        if isinstance(err, dict) and err.get("frames"):
+            context["exception"] = err
+            break
+
+    try:
+        context["runtime"] = collect_runtime_snapshot()
+    except Exception as e:
+        logger.warning(f"采集运行时快照失败: {e}")
+        context["runtime"] = {"error": f"采集失败: {e}"}
+
+    try:
+        analysis = analyze(context)
+        return {
+            "request_id": req.request_id,
+            "context": context,
+            "analysis": analysis,
+        }
+    except RuntimeError as e:
+        logger.error(f"LLM 分析失败: {e}")
+        raise HTTPException(status_code=502, detail=f"LLM 分析失败（已重试）: {str(e)}")
+    except Exception as e:
+        logger.exception("LLM 分析异常")
+        raise HTTPException(status_code=500, detail=f"LLM 分析失败: {str(e)}")
+
+
+@router.post("/analyze/stream")
+async def debug_analyze_stream(req: AnalyzeRequest):
+    """流式 LLM 分析（SSE）"""
+    try:
+        trace = get_logs(req.request_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取日志失败: {e}")
+
+    if not trace:
+        raise HTTPException(status_code=404, detail=f"找不到请求 {req.request_id}")
+
+    context = build_context(req.request_id, trace)
+    try:
+        context["runtime"] = collect_runtime_snapshot()
+    except Exception:
+        context["runtime"] = {}
+
+    async def event_stream():
+        try:
+            for chunk in analyze_stream(context):
+                data = json.dumps({"chunk": chunk}, ensure_ascii=False)
+                yield f"data: {data}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            logger.exception("流式分析异常")
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/runtime")
+def get_runtime():
+    """获取当前运行时快照"""
+    try:
+        return collect_runtime_snapshot()
+    except Exception as e:
+        logger.exception("采集运行时快照失败")
+        raise HTTPException(status_code=500, detail=f"采集失败: {e}")
+
+
+@router.get("/session")
+def list_sessions():
+    """列出活跃的调试会话"""
+    try:
+        sessions = session_manager.list_active()
+    except Exception as e:
+        logger.exception("列出会话失败")
+        raise HTTPException(status_code=500, detail=f"获取会话失败: {e}")
+
+    return {
+        "count": len(sessions),
+        "sessions": [
+            {
+                "session_id": s["session_id"],
+                "created_at": s["created_at"],
+                "last_active": s["last_active"],
+                "idle_seconds": round(s.get("last_active", 0) - s.get("created_at", 0), 1),
+                "metadata": s.get("metadata", {}),
+            }
+            for s in sessions
+        ],
+    }
