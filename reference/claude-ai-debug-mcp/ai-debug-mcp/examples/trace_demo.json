@@ -1,0 +1,48 @@
+{
+  "trace": {
+    "trace_id": "a1b2c3d4e5f6",
+    "timestamp": 1751871600.123,
+    "exc_type": "ZeroDivisionError",
+    "message": "division by zero",
+    "frames": [
+      {
+        "file": "examples/error_demo.py",
+        "line": 27,
+        "function": "run_buggy_logic",
+        "code_context": "total += divide(100, n)"
+      },
+      {
+        "file": "examples/error_demo.py",
+        "line": 21,
+        "function": "divide",
+        "code_context": "return a / b"
+      }
+    ],
+    "source": "manual_demo",
+    "extra": {}
+  },
+  "runtime": {
+    "pid": 12345,
+    "cpu_percent": 0.3,
+    "memory_mb": 42.1,
+    "thread_count": 1,
+    "open_files": 3,
+    "python_version": "3.11.9",
+    "env_hint": {}
+  },
+  "code_snippets": [
+    {
+      "file": "examples/error_demo.py",
+      "error_line": 27,
+      "snippet": "    23:     numbers = [10, 5, 0, 2]\n    24:     total = 0\n    25:     for n in numbers:\n>>> 27:         total += divide(100, n)\n    28:     return total",
+      "found": true
+    },
+    {
+      "file": "examples/error_demo.py",
+      "error_line": 21,
+      "snippet": "    19: def divide(a, b):\n>>> 21:     return a / b",
+      "found": true
+    }
+  ],
+  "note": "以上为原始堆栈、运行时状态与相关代码片段，未做 AI 分析。请结合项目代码库上下文自行判断根因与修复方案。"
+}

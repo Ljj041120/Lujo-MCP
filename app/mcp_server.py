@@ -36,6 +36,11 @@ from app.mcp.tools.debug_api import (
     get_runtime_snapshot as tool_get_runtime_snapshot,
     analyze_with_llm as tool_analyze_with_llm,
 )
+from app.mcp.tools.network_api import tool_ingest_network, tool_get_network_trace
+from app.mcp.tools.git_api import tool_get_blame_for_frame, tool_get_recent_diff
+from app.mcp.tools.silent_failure_api import tool_ingest_silent_failure
+from app.mcp.tools.ingest_api import tool_ingest_error
+from app.mcp.tools.spec_api import tool_get_related_specs
 from app.mcp.hooks.exception_hook import install_global_hook
 
 logging.basicConfig(level=logging.INFO, stream=None)  # stdio模式下不要往stdout打日志，避免污染协议流
@@ -112,6 +117,104 @@ async def list_tools() -> list[Tool]:
                 "properties": {"trace_id": {"type": "string"}},
             },
         ),
+        Tool(
+            name="ingest_network",
+            description="单条上报网络请求记录，通常由浏览器 SDK 或中间件调用。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "record": {"type": "object", "description": "网络请求记录"},
+                    "trace_id": {"type": "string"},
+                    "request_id": {"type": "string"},
+                },
+                "required": ["record"],
+            },
+        ),
+        Tool(
+            name="get_network_trace",
+            description="查询与某条 trace 关联的所有网络请求记录。",
+            inputSchema={
+                "type": "object",
+                "properties": {"trace_id": {"type": "string"}},
+                "required": ["trace_id"],
+            },
+        ),
+        Tool(
+            name="get_blame_for_frame",
+            description="查询指定文件/行最后一次是谁在哪次 commit 修改的，用于判断错误是不是近期改动引入。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string"},
+                    "line": {"type": "integer"},
+                },
+                "required": ["file", "line"],
+            },
+        ),
+        Tool(
+            name="get_recent_diff",
+            description="返回指定文件最近 N 次 commit 的 diff，用于对比近期改动。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string"},
+                    "commits_back": {"type": "integer", "default": 3},
+                },
+                "required": ["file"],
+            },
+        ),
+        Tool(
+            name="ingest_silent_failure",
+            description=(
+                "上报一条前端静默失败：用户期望发生的行为未在指定时间内出现，且没有显式异常。"
+                "包含 UI 事件链、网络请求链和期望行为描述。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string"},
+                    "frames": {"type": "array", "items": {"type": "object"}},
+                    "ui_events": {"type": "array", "items": {"type": "object"}},
+                    "network_records": {"type": "array", "items": {"type": "object"}},
+                    "expectation": {"type": "object"},
+                    "source": {"type": "string", "default": "browser_sdk"},
+                    "extra": {"type": "object", "default": {}},
+                },
+                "required": ["message"],
+            },
+        ),
+        Tool(
+            name="ingest_error",
+            description=(
+                "供任意语言/进程主动上报一条错误（不限于 Python）。"
+                "上报后自动脱敏并进入统一调试上下文。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "exc_type": {"type": "string"},
+                    "message": {"type": "string"},
+                    "frames": {"type": "array", "items": {"type": "object"}},
+                    "source": {"type": "string", "default": "ingest"},
+                    "extra": {"type": "object", "default": {}},
+                },
+                "required": ["exc_type", "message"],
+            },
+        ),
+        Tool(
+            name="get_related_specs",
+            description=(
+                "根据文件路径返回相关的项目规范片段（如 API 规范、组件规范、代码风格等）。"
+                "AI 在给出修复建议前应参考这些规范，确保方案符合项目约定。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string", "description": "要查询规范的文件路径"},
+                },
+                "required": ["file"],
+            },
+        ),
     ]
 
 
@@ -133,6 +236,38 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = tool_list_recent_traces(arguments.get("limit", 10))
         elif name == "analyze_with_llm":
             result = tool_analyze_with_llm(arguments.get("trace_id"))
+        elif name == "ingest_network":
+            result = tool_ingest_network(
+                record=arguments.get("record", {}),
+                trace_id=arguments.get("trace_id"),
+                request_id=arguments.get("request_id"),
+            )
+        elif name == "get_network_trace":
+            result = tool_get_network_trace(arguments["trace_id"])
+        elif name == "get_blame_for_frame":
+            result = tool_get_blame_for_frame(arguments["file"], arguments["line"])
+        elif name == "get_recent_diff":
+            result = tool_get_recent_diff(arguments["file"], arguments.get("commits_back", 3))
+        elif name == "ingest_silent_failure":
+            result = tool_ingest_silent_failure(
+                message=arguments.get("message", ""),
+                frames=arguments.get("frames"),
+                ui_events=arguments.get("ui_events"),
+                network_records=arguments.get("network_records"),
+                expectation=arguments.get("expectation"),
+                source=arguments.get("source", "browser_sdk"),
+                extra=arguments.get("extra"),
+            )
+        elif name == "ingest_error":
+            result = tool_ingest_error(
+                exc_type=arguments.get("exc_type", "UnknownError"),
+                message=arguments.get("message", ""),
+                frames=arguments.get("frames", []),
+                source=arguments.get("source", "ingest"),
+                extra=arguments.get("extra"),
+            )
+        elif name == "get_related_specs":
+            result = tool_get_related_specs(arguments["file"])
         else:
             result = {"error": f"未知工具: {name}"}
     except Exception as e:

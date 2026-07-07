@@ -56,6 +56,22 @@ class Settings(BaseSettings):
     # 请求体最大字节数（防御超大请求体 OOM / DoS）
     max_body_size: int = 1_048_576
 
+    # ── 脱敏（redaction）──
+    # 默认开启：数据入库前统一掩码敏感字段（fail-safe，宁可多掩不泄露）
+    redaction_enabled: bool = True
+    # 额外脱敏正则，每行一条；无效正则静默跳过，不阻断主流程
+    redaction_extra_patterns: str = ""
+
+    # ── Git 归因（M5）──
+    # git 命令超时秒数，超时返回 None，不阻断主流程
+    git_timeout: int = 10
+    # 允许执行 git 操作的路径白名单前缀（逗号分隔绝对路径）；为空=不限制（生产建议限定项目根）
+    git_path_whitelist: str = ""
+
+    # ── inbound 网络采集（M6）──
+    # 默认关闭：开启后记录每个进入服务的请求为 network 记录（跳过 /health /metrics）
+    network_capture_enabled: bool = False
+
     # ── 日志 ──
     log_level: str = "INFO"
     log_format: str = "json"  # "json" | "text"

@@ -1,0 +1,67 @@
+"""redaction 脱敏模块单测"""
+import pytest
+
+from app.config import settings
+from app.mcp.core.redaction import redact
+
+
+@pytest.fixture(autouse=True)
+def _reset_redaction():
+    """每个用例前后恢复默认脱敏配置，避免相互污染。"""
+    saved = (settings.redaction_enabled, settings.redaction_extra_patterns)
+    settings.redaction_enabled = True
+    settings.redaction_extra_patterns = ""
+    yield
+    settings.redaction_enabled, settings.redaction_extra_patterns = saved
+
+
+def test_password_masked():
+    assert redact('password = "secret123"') == 'password="***"'
+    assert redact("pwd: hello") == 'pwd="***"'
+    assert redact("passwd='abc'") == 'passwd="***"'
+
+
+def test_apikey_token_masked():
+    assert redact('api_key = "sk-xxxx"') == 'api_key="***"'
+    assert redact("token: abc.def.ghi") == 'token="***"'
+    assert redact("api-key=BearerZ9") == 'api-key="***"'
+
+
+def test_authorization_bearer_masked():
+    out = redact("Authorization: Bearer eyJhbGciOiJIUzI1")
+    assert "eyJhbGciOiJIUzI1" not in out
+    assert "Bearer" in out  # 保留 scheme，只掩值
+
+
+def test_phone_masked():
+    assert redact("contact 13800138000 now") == "contact ***PHONE*** now"
+
+
+def test_disabled_returns_original():
+    settings.redaction_enabled = False
+    raw = 'password = "secret123"'
+    assert redact(raw) == raw
+
+
+def test_none_and_non_string_passthrough():
+    assert redact(None) is None
+    assert redact("") == ""
+    assert redact(12345) == 12345  # 非字符串原样返回
+
+
+def test_no_false_positive_on_plain_text():
+    assert redact("just a normal log line") == "just a normal log line"
+
+
+def test_extra_patterns_applied():
+    # 自定义：掩码身份证号（18 位）
+    settings.redaction_extra_patterns = r"\b\d{17}[\dXx]\b"
+    out = redact("id=110101199003071234 done")
+    assert "110101199003071234" not in out
+    assert "***" in out
+
+
+def test_invalid_extra_pattern_skipped():
+    settings.redaction_extra_patterns = "(unclosed\npassword = \"x\""
+    # 无效正则被跳过，默认规则仍生效
+    assert redact('password = "x"') == 'password="***"'

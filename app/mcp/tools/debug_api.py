@@ -1,13 +1,8 @@
 """MCP 调试工具 —— 一键运行调试流程 / 运行时快照 / 调试上下文 / LLM 分析"""
 
-import sys
-
 from app.mcp.core.logs import create_request_id, add_log, get_logs
-from app.mcp.builders.context import build_context
+from app.mcp.builders.context import build_context, build_debug_context
 from app.mcp.collectors.runtime import collect_runtime_snapshot
-from app.mcp.collectors.stacktrace import capture_exception, format_trace_for_ai
-from app.mcp.collectors.code_locator import get_snippets_for_frames
-from app.mcp.core.errors import get_by_id, get_latest
 from app.llm.analyzer import analyze
 
 TOOL_DEF = {
@@ -55,53 +50,22 @@ def get_runtime_snapshot() -> dict:
     return collect_runtime_snapshot()
 
 
-def _build_context_from_error(error_id: str | None) -> dict:
-    """基于近期捕获的异常构建调试上下文（含源码片段）。"""
-    err = get_by_id(error_id) if error_id else get_latest()
-    if err is None:
-        # 退而求其次：尝试取当前线程未捕获异常
-        exc_info = sys.exc_info()
-        if exc_info[1] is not None:
-            err = capture_exception(exc_info[1])
-        else:
-            return {"message": "暂无捕获到的错误上下文"}
-
-    frames = err.get("frames", [])
-    code_snippets = (
-        [s.model_dump() for s in get_snippets_for_frames(frames)]
-        if frames
-        else []
-    )
-    exception = {
-        "type": err.get("type"),
-        "message": err.get("message"),
-        "traceback": err.get("traceback"),
-        "frames": frames,
-        "frame_count": err.get("frame_count", len(frames)),
-    }
-    return {
-        "request_id": err.get("error_id"),
-        "flow": ["error"],
-        "input": None,
-        "output": None,
-        "errors": [{"type": err.get("type"), "message": err.get("message")}],
-        "exception": exception,
-        "code_snippets": code_snippets,
-        "runtime": collect_runtime_snapshot(),
-    }
-
-
 def get_debug_context(trace_id: str | None = None) -> dict:
-    """【核心工具】一次性获取某次错误的完整调试上下文：异常堆栈 + 运行时快照 + 源码片段。"""
-    return _build_context_from_error(trace_id)
+    """【核心工具】一次性获取某次错误的完整调试上下文：
+    异常堆栈 + 运行时快照 + 源码片段 + git 归因 + 网络链 + UI 事件。
+    """
+    ctx = build_debug_context(trace_id)
+    if ctx is None:
+        return {"message": "暂无捕获到的错误上下文"}
+    return ctx
 
 
 def analyze_with_llm(trace_id: str | None = None) -> dict:
     """对指定/最近捕获的异常做 LLM 根因分析。"""
-    context = _build_context_from_error(trace_id)
-    if "message" in context and "exception" not in context:
-        return context
+    ctx = build_debug_context(trace_id)
+    if ctx is None:
+        return {"message": "暂无捕获到的错误上下文"}
     try:
-        return analyze(context)
+        return analyze(ctx)
     except RuntimeError as e:
         return {"error": f"LLM 分析失败: {e}"}

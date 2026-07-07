@@ -323,6 +323,27 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 
 ## 6. 待设计 / 缺口（架构师提出，待实现）
 
+### 6.0 迁移增量（参考项目迁移，M1–M8 已完成）✅
+
+下表能力已按 proj1 架构重新实现并通过单测（55 用例），**未复制 proj2 文件、未改存储抽象/中间件/协议/传输**：
+
+| 模块 | 文件 | 说明 |
+| --- | --- | --- |
+| 脱敏 | `app/mcp/core/redaction.py` | 存储边界统一脱敏，默认开启 |
+| 统一存取 | `app/mcp/core/trace_repo.py` | 在 TraceStorage + errors 之上实现 save_trace/get_trace/save_network_record/save_ui_event 等 |
+| 网络采集 | `app/mcp/collectors/network.py` + `tools/network_api.py` | 解析/截断 + ingest_network/get_network_trace |
+| UI 采集 | `app/mcp/collectors/ui_event.py` | 解析/截断 |
+| Git 归因 | `app/mcp/core/git.py` + `tools/git_api.py` | blame/diff，带超时+路径白名单 |
+| 静默失败 | `app/mcp/tools/silent_failure_api.py` + `api/ingest.py` | 编排 ui/network + trace_kind |
+| 跨语言上报 | `app/mcp/tools/ingest_api.py` + `api/ingest.py` | ingest_error |
+| inbound 采集 | `app/middleware_network.py` | 独立中间件，默认关闭，安全栈内层 |
+| 完整上下文 | `app/mcp/builders/context.py::build_debug_context` | 注入 code/git/network/ui/runtime/related_specs |
+| 规范驱动采集 | `app/mcp/collectors/spec.py` + `tools/spec_api.py` | 扫描/标签匹配/缓存/脱敏 + get_related_specs |
+| 指纹去重聚合 | `app/mcp/core/errors.py` | compute_fingerprint + occurrence_count，避免重复刷屏 |
+| 双传输注册 | `tools/__init__.py` + `mcp_server.py` | HTTP 11 工具 / stdio 13 工具 |
+
+> **仍待建**：Playwright 自动遍历（FR14）、`assert_behavior` 自动断言 + `verify` 工具（FR13 自动检测 / FR15 持续校验）、`specs` 存储 CRUD。proj2 的 tenacity/浏览器SDK 评估为不适用，未迁移。
+
 ### 6.1 FR11 代码定位接线（✅ 已实现，v0.2.1）
 
 **原问题**：`code_locator` 已写但 (a) `get_debug_context` 未调用它，(b) `config.py` 缺 `code_context_lines`。
@@ -336,7 +357,7 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 
 **验证**：编译通过 + 导入测试通过 + 功能测试（`get_code_snippet` 对本仓库文件产出带 `>>>` 标记片段与 `vscode://` 链接）。
 
-### 6.2 FR13 静默失败检测（🔲 P0，设计草案）
+### 6.2 FR13 静默失败检测（⚠️ 采集链已实现 M6，自动检测待建）
 
 **组件**：`app/mcp/verifier/assert_engine.py`
 - `Spec` 模型：`{kind:api|ui|rule, target, expect:{status?, body_rules?, state_change?}}`。
@@ -352,7 +373,7 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 - 复用 FR13 断言引擎，保证前后端口径一致。
 - 可降级：未装 Playwright 或元素未找到 → 跳过并告警，不阻断。
 
-### 6.4 FR15 规范驱动闭环（🔲 P0，设计草案）
+### 6.4 FR15 规范驱动闭环（⚠️ 采集+注入已实现 M9，verify/持续校验待建）
 
 **组件**：`app/mcp/core/spec_store.py`（memory/pg 同 trace_store 工厂）
 - 新增 MCP 工具 `spec`(get/set/list)、`verify`(按规范校验 request/interaction)。
@@ -400,7 +421,7 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 | --- | --- | --- |
 | 代码定位未接线 | `get_debug_context` 实际不含片段，文档与代码不一致 | §6.1 P0 修复 |
 | 配置键缺失 | `code_context_lines` 不存在 | §6.1 |
-| 静默失败/前端自动化未建 | P4/P5/P6 真实缺口 | §6.2–6.4 设计草案 |
+| 静默失败/前端自动化未建 | P5 采集链已就绪（M6）；P4 自动遍历(FR14)/P6 自动断言(FR13)/spec(FR15) 仍待建 | §6.2–6.4 设计草案 |
 | 厂商锁定 | 仅 OpenAI | 路线图多厂商抽象 |
 | memory 后端 | 重启即丢 | 生产用 postgresql |
 
