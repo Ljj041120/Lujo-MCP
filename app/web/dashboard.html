@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ai-debug-mcp Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e1e4e8; }
+  .header { background: #161b22; border-bottom: 1px solid #30363d; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+  .header h1 { font-size: 18px; color: #58a6ff; }
+  .header .refresh { font-size: 12px; color: #8b949e; }
+  .stats { display: flex; gap: 16px; padding: 16px 24px; }
+  .stat-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px 24px; flex: 1; text-align: center; }
+  .stat-card .num { font-size: 28px; font-weight: bold; }
+  .stat-card .label { font-size: 12px; color: #8b949e; margin-top: 4px; }
+  .stat-card.err .num { color: #f85149; }
+  .stat-card.silent .num { color: #d2991d; }
+  .stat-card.spec .num { color: #3fb950; }
+  .container { display: flex; gap: 16px; padding: 0 24px 24px; height: calc(100vh - 180px); }
+  .panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+  .panel-left { flex: 1; display: flex; flex-direction: column; }
+  .panel-right { flex: 1; display: flex; flex-direction: column; }
+  .panel-header { padding: 12px 16px; border-bottom: 1px solid #30363d; font-size: 13px; color: #8b949e; text-transform: uppercase; }
+  .trace-list { flex: 1; overflow-y: auto; }
+  .trace-item { padding: 10px 16px; border-bottom: 1px solid #21262d; cursor: pointer; transition: background .15s; display: flex; justify-content: space-between; align-items: flex-start; }
+  .trace-item:hover { background: #1c2128; }
+  .trace-item.active { background: #1c2840; border-left: 3px solid #58a6ff; }
+  .trace-item .info { flex: 1; min-width: 0; }
+  .trace-item .type { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trace-item .msg { font-size: 11px; color: #8b949e; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trace-item .badge { font-size: 10px; padding: 2px 6px; border-radius: 3px; margin-left: 8px; white-space: nowrap; }
+  .badge-error { background: #f8514940; color: #f85149; }
+  .badge-silent { background: #d2991d40; color: #d2991d; }
+  .badge-ok { background: #3fb95040; color: #3fb950; }
+  .badge-verify { background: #58a6ff40; color: #58a6ff; margin-left: 4px; }
+  .detail { flex: 1; overflow-y: auto; padding: 16px; }
+  .detail-empty { color: #8b949e; text-align: center; padding: 40px; }
+  .detail h3 { font-size: 14px; margin-bottom: 8px; color: #58a6ff; }
+  .detail-section { margin-bottom: 16px; }
+  .detail-section .label { font-size: 11px; color: #8b949e; text-transform: uppercase; margin-bottom: 4px; }
+  .detail-section .value { font-size: 13px; word-break: break-all; }
+  .diff-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+  .diff-table th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #30363d; color: #8b949e; }
+  .diff-table td { padding: 6px 8px; border-bottom: 1px solid #21262d; }
+  .diff-table .exp { color: #3fb950; }
+  .diff-table .act { color: #f85149; }
+  .no-data { color: #484f58; font-style: italic; font-size: 12px; }
+  .code-snippet { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; margin-top: 8px; font-family: monospace; font-size: 12px; overflow-x: auto; white-space: pre; }
+  .loading { text-align: center; padding: 20px; color: #8b949e; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #0d1117; }
+  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>ai-debug-mcp Dashboard</h1>
+  <span class="refresh" id="refresh"></span>
+</div>
+
+<div class="stats">
+  <div class="stat-card" id="stat-total"><div class="num">-</div><div class="label">Total Traces</div></div>
+  <div class="stat-card err" id="stat-exc"><div class="num">-</div><div class="label">Exceptions</div></div>
+  <div class="stat-card silent" id="stat-silent"><div class="num">-</div><div class="label">Silent Failures</div></div>
+  <div class="stat-card spec" id="stat-specs"><div class="num">-</div><div class="label">Specs</div></div>
+</div>
+
+<div class="container">
+  <div class="panel panel-left">
+    <div class="panel-header">Recent Traces</div>
+    <div class="trace-list" id="trace-list"><div class="loading">Loading...</div></div>
+  </div>
+  <div class="panel panel-right">
+    <div class="panel-header">Trace Detail</div>
+    <div class="detail" id="detail"><div class="detail-empty">Select a trace to view details</div></div>
+  </div>
+</div>
+
+<script>
+async function fetchJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+async function loadStats() {
+  try {
+    const s = await fetchJSON('/api/dashboard/stats');
+    document.getElementById('stat-total').querySelector('.num').textContent = s.total_traces;
+    document.getElementById('stat-exc').querySelector('.num').textContent = s.exceptions;
+    document.getElementById('stat-silent').querySelector('.num').textContent = s.silent_failures;
+    document.getElementById('stat-specs').querySelector('.num').textContent = s.spec_count;
+  } catch(e) { console.error('stats error', e); }
+}
+
+function formatTime(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString('zh-CN') + ' ' + d.toLocaleDateString('zh-CN');
+}
+
+async function loadTraces() {
+  const list = document.getElementById('trace-list');
+  try {
+    const data = await fetchJSON('/api/dashboard/traces?limit=50');
+    if (!data.traces.length) {
+      list.innerHTML = '<div class="loading">No traces yet</div>';
+      return;
+    }
+    list.innerHTML = data.traces.map(t => `
+      <div class="trace-item" data-tid="${t.trace_id}" onclick="selectTrace('${t.trace_id}')">
+        <div class="info">
+          <div class="type">${esc(t.type)} ${t.has_silent_failure ? '<span class="badge badge-silent">SILENT</span>' : ''} ${t.verify_count ? '<span class="badge badge-verify">verify×'+t.verify_count+'</span>' : ''}</div>
+          <div class="msg">${esc(t.message)} · ${formatTime(t.timestamp)} · ×${t.occurrence_count}</div>
+        </div>
+        <span class="badge ${t.has_silent_failure ? 'badge-silent' : 'badge-error'}">${t.trace_kind}</span>
+      </div>
+    `).join('');
+  } catch(e) {
+    list.innerHTML = '<div class="loading">Failed to load traces</div>';
+  }
+}
+
+async function selectTrace(tid) {
+  // highlight active
+  document.querySelectorAll('.trace-item').forEach(el => el.classList.remove('active'));
+  const el = document.querySelector(`[data-tid="${tid}"]`);
+  if (el) el.classList.add('active');
+
+  const detail = document.getElementById('detail');
+  detail.innerHTML = '<div class="loading">Loading...</div>';
+
+  try {
+    const t = await fetchJSON('/api/dashboard/trace/' + tid);
+    let html = '';
+
+    // Exception
+    if (t.exception) {
+      html += '<div class="detail-section"><div class="label">Exception</div>';
+      html += `<div class="value">${esc(t.exception.type)}: ${esc(t.exception.message)}</div>`;
+      if (t.exception.frames && t.exception.frames.length) {
+        html += '<div class="code-snippet">' + t.exception.frames.map(f =>
+          `${f.file}:${f.line} in ${f.function}`
+        ).join('\n') + '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Errors
+    if (t.errors && t.errors.length) {
+      html += '<div class="detail-section"><div class="label">Errors</div>';
+      t.errors.forEach(e => {
+        html += `<div class="value">${typeof e === 'string' ? esc(e) : esc(e.message||'')}</div>`;
+      });
+      html += '</div>';
+    }
+
+    // Spec Diffs (verify results)
+    html += '<div class="detail-section"><div class="label">Spec Diffs</div>';
+    if (t.spec_diffs && t.spec_diffs.length) {
+      t.spec_diffs.forEach(diff => {
+        html += `<div class="value" style="margin-bottom:8px">`;
+        html += `Matched: <b style="color:${diff.matched?'#3fb950':'#f85149'}">${diff.matched}</b>`;
+        if (diff.silent_failure) html += ' | <b style="color:#d2991d">Silent Failure</b>';
+        if (diff.spec_id) html += ` | Spec: ${esc(diff.spec_id)}`;
+        html += '</div>';
+        if (diff.diffs && diff.diffs.length) {
+          html += '<table class="diff-table"><tr><th>Field</th><th>Expected</th><th>Actual</th></tr>';
+          diff.diffs.forEach(d => {
+            html += `<tr><td>${esc(d.field)}</td><td class="exp">${esc(String(d.expected))}</td><td class="act">${esc(String(d.actual))}</td></tr>`;
+          });
+          html += '</table>';
+        }
+      });
+    } else {
+      html += '<div class="no-data">No spec diffs — verify not yet run for this trace</div>';
+    }
+    html += '</div>';
+
+    // Code snippets
+    if (t.code_snippets && t.code_snippets.length) {
+      html += '<div class="detail-section"><div class="label">Code Snippets</div>';
+      t.code_snippets.forEach(s => {
+        if (s.found) {
+          html += `<div class="code-snippet">${esc(s.file)}:${s.line}\n${esc(s.content||'')}</div>`;
+        }
+      });
+      html += '</div>';
+    }
+
+    detail.innerHTML = html;
+  } catch(e) {
+    detail.innerHTML = '<div class="loading">Failed to load trace detail</div>';
+  }
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function refresh() {
+  document.getElementById('refresh').textContent = 'Refreshing...';
+  await Promise.all([loadStats(), loadTraces()]);
+  document.getElementById('refresh').textContent = 'Updated ' + new Date().toLocaleTimeString('zh-CN');
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
