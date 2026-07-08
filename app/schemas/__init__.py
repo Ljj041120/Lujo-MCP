@@ -102,3 +102,47 @@ class HealthResponse(BaseModel):
     version: str
     storage_backend: str
     llm_configured: bool
+
+
+# ── 规范（Spec / Verify）─
+class SpecExpect(BaseModel):
+    """期望行为定义"""
+    status: Optional[int] = None
+    body_rules: Optional[dict] = None
+    state_change: Optional[dict] = None
+    interactions: Optional[list[dict]] = None
+    no_response: Optional[bool] = None
+
+
+class Spec(BaseModel):
+    """期望规范（FR15）"""
+    id: Optional[str] = None
+    kind: str = "api"  # api | ui | rule
+    target: str = ""
+    expect: SpecExpect = Field(default_factory=SpecExpect)
+    created_at: Optional[float] = None
+    updated_at: Optional[float] = None
+
+
+class SpecListResponse(BaseModel):
+    """规范列表响应"""
+    count: int
+    specs: list[Spec]
+
+
+class DiffItem(BaseModel):
+    """单条差异"""
+    field: str
+    expected: Any = None
+    actual: Any = None
+
+
+class VerifyResult(BaseModel):
+    """验证结果（FR13）"""
+    matched: bool
+    diffs: list[DiffItem] = Field(default_factory=list)
+    silent_failure: bool = False
+    error: Optional[str] = None
+    trace_id: Optional[str] = None
+    spec_diffs: Optional[list[DiffItem]] = None
+    interactions: Optional[list[dict]] = None
