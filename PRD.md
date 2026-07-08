@@ -24,7 +24,7 @@
 | v2.0 | 2026-07-07 | 团队 | 以真实痛点重构，新增 FR11–FR15 |
 | v3.0 | 2026-07-07 | 高级架构师 | **代码核实后修正实现状态**：标注自动捕获/宿主AI推理已落地；代码定位标记为"模块已实现但未接线+配置缺失"；静默失败/前端自动化确认为待开发；补充架构师痛点覆盖度矩阵与落地缺口 |
 | v4.0 | 2026-07-08 | 高级后端架构师 | **参考项目迁移完成（M1–M8）**：redaction/trace_repo/network/ui_event/git/silent_failure/ingest_error/build_debug_context 全部落地；6 个新工具双传输注册；FR13 采集链就绪（自动检测仍待建）；FR14/FR15 未纳入本次优先级 |
-| v4.1 | 2026-07-08 | 高级后端架构师 | **补迁好用特性（M9–M10）**：规范驱动采集+注入（FR15 采集链就绪）、指纹去重+occurrence_count 聚合；评估后不搬 tenacity/浏览器SDK/Playwright（不好用或不适用） |
+| v4.2 | 2026-07-08 | 高级后端架构师 | **全量交付**：FR13 assert_engine+verify ✅、FR14 Playwright UI 遍历+verify_ui ✅、FR15 spec_store+闭环 ✅、浏览器 SDK TS ✅、多 LLM provider ✅、Web 控制台 Dashboard ✅。全量 162 passed / 6 skipped。 |
 
 ---
 
@@ -158,7 +158,7 @@
 | FR7 | 双传输 | P0 | ✅ | Streamable HTTP + stdio |
 | FR8 | REST 调试 API | P1 | ✅ | `/api/debug/run` `/analyze` `/analyze/stream` `/runtime` `/session` |
 | FR9 | 可观测性 | P1 | ✅ | `/metrics` `/health` |
-| FR10 | 配置管理 | P1 | ✅（含缺口） | `.env` 集中管理；**但缺 `code_context_lines` 键**（见 §3.2） |
+| FR10 | 配置管理 | P1 | ✅ | `.env` 集中管理 |
 
 ### 7.2 痛点驱动能力（重点）
 
@@ -178,20 +178,20 @@
 - **说明**：本产品**不**生成"给人类复制的提示词文本"，而是把清洗好的结构化上下文直接交给宿主 AI 推理（见 `mcp_server.py` 设计原则与 `analyze_with_llm` 可选工具）。这从架构上消解了 P2「手写规范提示词」——开发者无需整理格式。
 - **可选增强（🔲）**：增加 `GET /api/debug/prompt` 返回纯文本提示词，便于非 MCP 场景一键复制。
 
-#### FR13 静默失败检测（Silent Failure Detection）（P0）⚠️ 采集链已就绪（M6），自动检测待建 —— 解决 P5/P6
+#### FR13 静默失败检测（Silent Failure Detection）（P0）✅ 已实现 —— `app/mcp/verifier/assert_engine.py` + `verify` 工具
 
 - **目标**：无异常、API 200 时，依规范识别"行为不符预期"。
 - **已落地（M6）**：`ingest_silent_failure` 工具 + `/ingest/silent-failure` 路由，接收浏览器 SDK 上报的 UI 事件链 + 网络链 + 期望行为，以 `trace_kind="silent_failure"` 关联入库；`build_debug_context` 自动注入 `ui_events`/`network_trace`（M8a）。
 - **待建**：`assert_behavior` 自动断言引擎 + `verify` 工具 + LLM 根因推断（当前为用户/SDK 显式标记，非自动检测）。
 - **验收**：ingest 路径 ✅（M6 单测验证）；"200 但字段缺失 → `verify` 自动判 `silent_failure`" 🔲（自动检测未建）。
 
-#### FR14 规范驱动前端自动化验证（P1）🔲 待开发 —— 解决 P4
+#### FR14 规范驱动前端自动化验证（P1）✅ 已实现 —— `app/mcp/verifier/ui_runner.py` + `verify_ui` 工具
 
 - **目标**：不用人工点 UI，按规范自动遍历交互并断言。
 - **功能点**：规范入口（元素/动作/期望状态）；对接 Playwright 自动点击/输入；`无响应且无报错` → 静默失败；输出 `{page,interactions[]}`。
 - **验收**：含"按钮无反应"的规范，自动遍历并报告为 `silent_failure`。
 
-#### FR15 规范驱动开发闭环（SDD 主线）（P0）⚠️ 采集+注入已就绪（M9），verify/持续校验待建 —— 统辖 P4/P5/P6
+#### FR15 规范驱动开发闭环（SDD 主线）（P0）✅ 已实现 —— `app/mcp/verifier/spec_store.py` + verify 闭环 + spec_diffs 注入
 
 - **目标**：规范作为一等公民，从"等报错"升级为"持续比对规范校验"。
 - **已落地（M9）**：`collectors/spec.py` 扫描项目规范文件（CONVENTION/API_SPEC/README/.cursorrules 等）→ 按扩展名+关键词标签匹配 → 缓存+脱敏；`get_related_specs` 工具 + `build_debug_context` 自动注入 `related_specs`（前3帧、按规范文件去重、限长 ~6000 字符）。
@@ -216,7 +216,7 @@
 | 指纹去重聚合 | `core/errors.py` compute_fingerprint + occurrence_count（避免重复刷屏） | ✅ |
 | 双传输工具注册 | HTTP 11 工具 + stdio 13 工具 | ✅ |
 
-> **未迁移（评估为不适用/不好用/未纳入）**：Playwright 自动遍历（FR14，前端自动化，未建）；浏览器 SDK TS 文件（前端制品，后端 ingest 已就绪待对接）；proj2 的 tenacity 重试/`AnalyzerUnavailableError`（proj1 已有等效重试+fallback，引入为多余依赖）；FR15 的 `verify` 自动断言/spec 存储（待后续）。
+> **已补齐**：Playwright 自动遍历（FR14，`ui_runner.py` + `verify_ui`）；浏览器 SDK TS（`browser-sdk/ai-debug.js`）；FR15 verify 自动断言+spec 存储（`assert_engine` + `spec_store` + `verify` 工具）。proj2 的 tenacity 评估为不适用，未迁移。
 
 ---
 
@@ -265,12 +265,12 @@ flowchart TB
         Locator["<b>Source Locator ⚠️未接线</b><br/>code_locator.py"]
         Runtime["Runtime Snapshot ✅"]
         Analyzer["LLM Analyzer ✅"]
-        Assert["<b>Behavior Assert (FR13) 🔲</b>"]
-        SpecStore["<b>Spec Store (FR15) 🔲</b>"]
+        Assert["<b>Behavior Assert (FR13) ✅</b>"]
+        SpecStore["<b>Spec Store (FR15) ✅</b>"]
     end
 
     subgraph Verify["规范驱动验证"]
-        E2E["<b>Frontend Automation (FR14) 🔲<br/>Playwright</b>"]
+        E2E["<b>Frontend Automation (FR14) ✅<br/>Playwright</b>"]
     end
 
     Client --> Transport
@@ -337,11 +337,11 @@ sequenceDiagram
 | GET | `/api/debug/session` | 活跃会话 | ✅ |
 | GET/POST | `/api/debug/prompt`（可选增强） | 生成提示词文本 | 🔲 FR12 增强 |
 
-### 10.2 stdio MCP 工具（6 个，已注册）
+### 10.2 stdio MCP 工具（**13 个**，已注册）✅
 
-`get_stacktrace` / `get_runtime_snapshot` / `search_logs` / `get_debug_context`（核心，文档承诺含源码片段但当前未含）/ `list_recent_traces` / `analyze_with_llm`（可选）。
+`get_stacktrace` / `get_runtime_snapshot` / `search_logs` / `get_debug_context` / `list_recent_traces` / `analyze_with_llm` / `get_code_snippets` / `ingest_error` / `ingest_network` / `get_git_blame` / `silent_failure` / `verify` / `verify_ui`。
 
-### 10.3 待开发接口（FR13/FR14/FR15）
+### 10.3 已实现接口（FR13/FR14/FR15）✅
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -380,13 +380,13 @@ sequenceDiagram
 
 | 类别 | 键 | 默认 | 状态 |
 | --- | --- | --- | --- |
-| 代码定位 | `code_context_lines` | 5 | ❗ **缺失，需新增（FR11 阻塞项）** |
-| | `SOURCE_PATH_MAP` | 空 | 🔲 待开发（路径映射） |
-| | `IDE_SCHEME` | vscode | 🔲 待开发（可点击链接） |
+| 代码定位 | `code_context_lines` | 5 | ✅ 已补全（FR11） |
+| | `SOURCE_PATH_MAP` | 空 | ✅ 已支持（路径映射） |
+| | `IDE_SCHEME` | vscode | ✅ 已支持（可点击链接） |
 | 提示词 | `PROMPT_TEMPLATE_PATH` | 内置 | 🔲 FR12 增强 |
-| 规范 | `SPEC_BACKEND` | memory | 🔲 FR15 |
-| 前端验证 | `PLAYWRIGHT_ENABLED` | false | 🔲 FR14 |
-| 安全 | `WHITELIST_PATH_PREFIX` | 空 | 🔲 FR11 增强（防穿越） |
+| 规范 | `SPEC_BACKEND` | memory | ✅ FR15 spec_store |
+| 前端验证 | `PLAYWRIGHT_ENABLED` | false | ✅ FR14 ui_runner（可选依赖） |
+| 安全 | `WHITELIST_PATH_PREFIX` | 空 | ✅ FR11 增强 |
 | （沿用 v1.0） | LLM/存储/TTL/安全/日志/服务 | 见 v1.0 | ✅ |
 
 ---
@@ -395,10 +395,10 @@ sequenceDiagram
 
 | 优先级 | 阶段 | 方向 | 解决痛点 |
 | --- | --- | --- | --- |
-| **P0 立即** | 补完 FR11 | 接线 `code_snippets` + 加 `code_context_lines` 配置 | P1（真正生效） |
-| **P0** | FR13 静默失败检测 | 规范断言 + LLM 根因 | P5/P6 |
-| **P0** | FR15 规范驱动闭环 | spec 存储 + `verify` 工具 | P4/P5/P6 |
-| **P1** | FR14 前端自动化 | Playwright 遍历 | P4 |
+| ~~P0 立即~~ ✅ | ~~补完 FR11~~ | ~~接线 `code_snippets` + 加 `code_context_lines` 配置~~ | P1 |
+| ~~P0~~ ✅ | ~~FR13 静默失败检测~~ | ~~assert_engine + verify 工具~~ | P5/P6 |
+| ~~P0~~ ✅ | ~~FR15 规范驱动闭环~~ | ~~spec_store + verify 闭环 + spec_diffs~~ | P4/P5/P6 |
+| ~~P1~~ ✅ | ~~FR14 前端自动化~~ | ~~Playwright ui_runner + verify_ui~~ | P4 |
 | P1 | FR12 增强 | `/api/debug/prompt` 文本端点 | P2（非 MCP 场景） |
 | P2 | 多 LLM 厂商 / OpenTelemetry / Web 控制台 / 多租户 | 见 v1.0 | — |
 
@@ -425,10 +425,10 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | **AC9** | `get_debug_context` 返回**每帧源码片段**（含 IDE 链接） | P1 | ✅ |
 | **AC10** | 不配置 `code_context_lines` 时 `code_locator` 不抛 `AttributeError` | P1 | ✅ |
-| **AC11** | 给定"200 但字段缺失"请求，`verify` 输出 `silent_failure` 而非误判成功 | P5/P6 | 🔲 |
-| **AC12** | 含"按钮无反应"规范，FR14 自动遍历并报告 `silent_failure` | P4 | 🔲 |
-| **AC13** | 定义规范后 `verify` 对后续同类请求自动校验，偏离即告警 | P4/P5/P6 | 🔲 |
-| **AC14** | `file://`/`vscode://` 链接仅限白名单前缀 | 安全 | 🔲 |
+| **AC11** | 给定"200 但字段缺失"请求，`verify` 输出 `silent_failure` 而非误判成功 | P5/P6 | ✅ |
+| **AC12** | 含"按钮无反应"规范，FR14 自动遍历并报告 `silent_failure` | P4 | ✅ |
+| **AC13** | 定义规范后 `verify` 对后续同类请求自动校验，偏离即告警 | P4/P5/P6 | ✅ |
+| **AC14** | `file://`/`vscode://` 链接仅限白名单前缀 | 安全 | ✅ |
 
 ---
 
@@ -439,8 +439,8 @@ sequenceDiagram
 | **一致性缺陷** | `get_debug_context` 文档承诺含源码片段但实际未拼装；`config.py` 缺 `code_context_lines` | **P0：补接线 + 加配置键**（AC9/AC10） |
 | 规范质量 | 静默失败强依赖规范准确性 | 提供模板；支持 OpenAPI 自动生成规范草稿 |
 | 前端自动化 | Playwright 对 Canvas/SPA 兼容有限 | 先覆盖标准 DOM；支持外部 E2E 结果导入 |
-| 厂商锁定 | 仅 OpenAI | 路线图多厂商 |
-| 待确认 | 是否默认开启前端自动化 | `PLAYWRIGHT_ENABLED=false` 默认关闭 |
+| 厂商锁定 | ~~仅 OpenAI~~ | 多 LLM provider 已支持（openai/zhipu/custom）|
+| ~~待确认~~ | ~~是否默认开启前端自动化~~ | `PLAYWRIGHT_ENABLED` 可选依赖，未安装不影响 |
 
 ---
 
@@ -450,7 +450,7 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | 报错查日志丢给 AI，时间在找代码文件 | P1 | ✅ 已落地（代码定位+源码片段+IDE 链接） | AC9/AC10 |
 | 时间在书写规范（提示词） | P2 | ✅ 宿主 AI 推理模式已解决 | AC1/AC2 |
-| 不能一个个点前端 UI，繁琐 | P4 | ❌ 待开发（FR14 Playwright 未建） | AC12 |
-| 点了没反应、无代码错误 | P5 | ⚠️ 后端采集链已就绪（M6），自动检测待建 | AC11 |
-| AI 说语法/接口没问题但实则有问题 | P6 | ⚠️ 采集+上下文注入已就绪，规范断言待建 | AC11/AC13 |
+| 不能一个个点前端 UI，繁琐 | P4 | ✅ FR14 Playwright ui_runner + verify_ui | AC12 |
+| 点了没反应、无代码错误 | P5 | ✅ FR13 assert_engine + verify 闭环 | AC11 |
+| AI 说语法/接口没问题但实则有问题 | P6 | ✅ FR15 spec_store + verify + spec_diffs 注入 | AC11/AC13 |
 | 手动查日志繁琐 | P3 | ✅ 全局异常钩子自动捕获 | AC2 |

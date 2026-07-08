@@ -2,7 +2,7 @@
 
 > 本文档描述 ai-debug-mcp 的**实现设计**：系统架构、模块职责、关键流程、数据模型、接口契约、设计决策与待设计项。
 > 配套文档：产品需求文档 `PRD.md`（回答"做什么/为什么"），本文档回答"怎么做"。
-> 版本：v0.2.0｜设计状态：✅ 已落地 / ⚠️ 已写待补完 / 🔲 设计草案（待实现）
+> 版本：v0.3.0｜设计状态：✅ 已落地 / ⚠️ 已写待补完 / 🔲 设计草案（待实现）
 > 审阅视角：高级工程师 / 高级架构师
 
 ---
@@ -58,7 +58,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │ 存储/状态 (Storage)                                           │
 │ trace_store(memory/pg) │ session registry │ state store(memory/redis) │
-│ sse hub (广播) │ specs 🔲(FR15)                              │
+│ sse hub (广播) │ specs ✅(FR15, spec_store)                   │
 └───────────────────────────────┬─────────────────────────────┘
                                 ▼
                           OpenAI API
@@ -84,7 +84,7 @@ flowchart TB
         LOGS["logs: create/add/get"]
         BUILD["context builder"]
         ST["stacktrace collector"]
-        LOC["code_locator ⚠️未接线"]
+        LOC["code_locator ✅"]
         RT["runtime snapshot"]
         AN["llm analyzer"]
         HOOK["exception_hook ✅"]
@@ -194,17 +194,17 @@ flowchart TB
 
 `build_context(request_id, logs)` → `{request_id, flow, input, output, errors}`。单条格式异常 `try/except` 标记为 `<malformed>` 并跳过，**不阻断整体**。
 
-> ⚠️ 注意：此构建器**不含 `code_snippets`**。要落实 P1，需在此或 `get_debug_context` 中调用 `code_locator.get_snippets_for_frames()`（见 §6 待设计）。
+> ⚠️ 注意：此构建器现已含 `code_snippets`（FR11 已接线）。详见 §6.1。
 
 #### 3.4.3 Stacktrace Collector（`app/mcp/collectors/stacktrace.py`）✅
 
 `capture_exception(exc)` → `{type, message, traceback, frames[], frame_count}`；每帧 `{file, line, function, code, locals}`。`format_trace_for_ai()` 生成精简文本（含局部变量前 N 个）。
 
-#### 3.4.4 Code Locator（`app/mcp/collectors/code_locator.py`）⚠️ 已实现模块，未接线+配置缺失
+#### 3.4.4 Code Locator（`app/mcp/collectors/code_locator.py`）✅ 已接线
 
 - `get_code_snippet(file, line, context_lines)`：用 `linecache` 读取 `line±context_lines` 行，报错行以 `>>> N: ` 标注；文件读不到返回 `found=False`。
 - `get_snippets_for_frames(frames)`：批量处理堆栈帧。
-- **缺陷（需修）**：第 15 行 `settings.code_context_lines` 在 `config.py` 中**不存在** → 不传 `context_lines` 时 `AttributeError`。`schemas/context.py` 的 `DebugContext.code_snippets` 字段已定义但未在任何工具输出中被填充。
+- **已修复**：`config.py` 已增加 `code_context_lines`、`source_path_map`、`ide_scheme`、`whitelist_path_prefix`。
 
 #### 3.4.5 Runtime Snapshot（`app/mcp/collectors/runtime.py`）✅
 
@@ -236,7 +236,7 @@ flowchart TB
 | `session registry` | MCP `Mcp-Session-Id` 会话生命周期 | `transports/session.py`，TTL 1800s |
 | `state store` | 限流/计数 | `memory` / `redis` |
 | `sse hub` | 服务端→客户端广播 | `transports/sse.py` |
-| `specs` 🔲 | 规范存储（FR15） | 待设计 |
+| `specs` ✅ | 规范存储（FR15） | `app/mcp/verifier/spec_store.py`，dict+Lock 主存 + add_log 持久化 |
 
 ### 3.6 可观测性（`app/observability.py`）✅
 
@@ -342,7 +342,7 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 | 指纹去重聚合 | `app/mcp/core/errors.py` | compute_fingerprint + occurrence_count，避免重复刷屏 |
 | 双传输注册 | `tools/__init__.py` + `mcp_server.py` | HTTP 11 工具 / stdio 13 工具 |
 
-> **仍待建**：Playwright 自动遍历（FR14）、`assert_behavior` 自动断言 + `verify` 工具（FR13 自动检测 / FR15 持续校验）、`specs` 存储 CRUD。proj2 的 tenacity/浏览器SDK 评估为不适用，未迁移。
+> **补充完成**：Playwright 自动遍历（FR14）✅、`assert_behavior` 自动断言 + `verify` 工具（FR13 自动检测 / FR15 持续校验）✅、`specs` 存储 CRUD（spec_store）✅、浏览器 SDK TS ✅、多 LLM provider ✅、Web 控制台 Dashboard ✅。proj2 的 tenacity 评估为不适用，未迁移。
 
 ### 6.1 FR11 代码定位接线（✅ 已实现，v0.2.1）
 
@@ -357,7 +357,7 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 
 **验证**：编译通过 + 导入测试通过 + 功能测试（`get_code_snippet` 对本仓库文件产出带 `>>>` 标记片段与 `vscode://` 链接）。
 
-### 6.2 FR13 静默失败检测（⚠️ 采集链已实现 M6，自动检测待建）
+### 6.2 FR13 静默失败检测（✅ 已实现）
 
 **组件**：`app/mcp/verifier/assert_engine.py`
 - `Spec` 模型：`{kind:api|ui|rule, target, expect:{status?, body_rules?, state_change?}}`。
@@ -365,7 +365,7 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 - 判定：当 `matched==False` 且 `status` 非 4xx/5xx 且无异常 → 产出 `SilentFailure{type, target, expected, observed, likely_cause}`。
 - `likely_cause` 由 LLM 基于 `diffs + context` 推断（复用 `analyzer`）。
 
-### 6.3 FR14 前端自动化验证（🔲 P1，设计草案）
+### 6.3 FR14 前端自动化验证（✅ 已实现）
 
 **组件**：`app/verifier/ui_runner.py`（可选依赖 `playwright`）
 - 输入规范：`{page_url, interactions:[{action:click|type|navigate, selector, expect:{state_change?|no_response?}}]}`。
@@ -373,7 +373,7 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 - 复用 FR13 断言引擎，保证前后端口径一致。
 - 可降级：未装 Playwright 或元素未找到 → 跳过并告警，不阻断。
 
-### 6.4 FR15 规范驱动闭环（⚠️ 采集+注入已实现 M9，verify/持续校验待建）
+### 6.4 FR15 规范驱动闭环（✅ 已实现）
 
 **组件**：`app/mcp/core/spec_store.py`（memory/pg 同 trace_store 工厂）
 - 新增 MCP 工具 `spec`(get/set/list)、`verify`(按规范校验 request/interaction)。
@@ -419,10 +419,9 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 
 | 项 | 说明 | 处置 |
 | --- | --- | --- |
-| 代码定位未接线 | `get_debug_context` 实际不含片段，文档与代码不一致 | §6.1 P0 修复 |
-| 配置键缺失 | `code_context_lines` 不存在 | §6.1 |
-| 静默失败/前端自动化未建 | P5 采集链已就绪（M6）；P4 自动遍历(FR14)/P6 自动断言(FR13)/spec(FR15) 仍待建 | §6.2–6.4 设计草案 |
-| 厂商锁定 | 仅 OpenAI | 路线图多厂商抽象 |
+| ~~代码定位未接线~~ | ~~`get_debug_context` 不含片段~~ | §6.1 ✅ 已修复 |
+| ~~静默失败/前端自动化~~ | ~~FR13/FR14/FR15 待建~~ | ✅ 已实现 |
+| 厂商锁定 | 仅 OpenAI | 多 LLM provider 已支持（openai/zhipu/custom）|
 | memory 后端 | 重启即丢 | 生产用 postgresql |
 
 ---
