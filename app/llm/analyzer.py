@@ -14,17 +14,35 @@ logger = logging.getLogger("ai-debug-mcp.llm")
 _client: Optional[OpenAI] = None
 
 
+_PROVIDER_BASE_URLS = {
+    "openai": "",
+    "zhipu": "https://open.bigmodel.cn/api/paas/v4/",
+    "custom": "",
+}
+
+
+def _resolve_base_url() -> str:
+    """确定 base_url：显式配置优先 → provider 默认 → 空（OpenAI 默认）"""
+    return settings.llm_base_url or _PROVIDER_BASE_URLS.get(settings.llm_provider, "")
+
+
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
         api_key = settings.openai_api_key
         if not api_key:
             raise RuntimeError("请在 .env 中配置有效的 OPENAI_API_KEY")
-        _client = OpenAI(
-            api_key=api_key,
-            timeout=settings.llm_timeout,
-            max_retries=0,  # 我们自己控制重试
-        )
+
+        base_url = _resolve_base_url()
+        kwargs = {
+            "api_key": api_key,
+            "timeout": settings.llm_timeout,
+            "max_retries": 0,  # 我们自己控制重试
+        }
+        if base_url:
+            kwargs["base_url"] = base_url
+
+        _client = OpenAI(**kwargs)
     return _client
 
 

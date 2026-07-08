@@ -6,6 +6,11 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # ── LLM ──
+    # provider: "openai" | "zhipu" | "custom"
+    # openai → 默认 https://api.openai.com/v1
+    # zhipu  → 自动设置 base_url = https://open.bigmodel.cn/api/paas/v4/，model 推荐 glm-4-flash
+    # custom → 需自行填写 llm_base_url
+    llm_provider: str = "openai"
     openai_api_key: str = ""
     llm_model: str = "gpt-4o"
     llm_timeout: int = 30
@@ -13,6 +18,8 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.3
     # 备用模型（主模型不可用时 fallback）
     llm_fallback_model: str = "gpt-4o-mini"
+    # 自定义 base_url（留空则按 llm_provider 自动选；填写后覆盖 provider 默认值）
+    llm_base_url: str = ""
 
     # ── 上下文 ──
     max_context_tokens: int = 8000

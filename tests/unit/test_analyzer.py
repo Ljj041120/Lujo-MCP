@@ -78,3 +78,73 @@ class TestAnalyzer:
         assert result["model"] == "gpt-4o-mock"
         assert result["usage"]["total_tokens"] == 150
         assert result["attempts"] == 1
+
+
+class TestLLMProvider:
+
+    def test_resolve_base_url_openai_default(self):
+        """openai provider 默认无 base_url（用 OpenAI SDK 默认地址）"""
+        from app.config import settings
+
+        saved_provider = settings.llm_provider
+        saved_base_url = settings.llm_base_url
+        try:
+            settings.llm_provider = "openai"
+            settings.llm_base_url = ""
+            from app.llm.analyzer import _resolve_base_url
+            assert _resolve_base_url() == ""
+        finally:
+            settings.llm_provider = saved_provider
+            settings.llm_base_url = saved_base_url
+
+    def test_resolve_base_url_zhipu(self):
+        """zhipu provider 自动使用智谱 API 地址"""
+        from app.config import settings
+
+        saved_provider = settings.llm_provider
+        saved_base_url = settings.llm_base_url
+        try:
+            settings.llm_provider = "zhipu"
+            settings.llm_base_url = ""
+            from app.llm.analyzer import _resolve_base_url
+            assert _resolve_base_url() == "https://open.bigmodel.cn/api/paas/v4/"
+        finally:
+            settings.llm_provider = saved_provider
+            settings.llm_base_url = saved_base_url
+
+    def test_resolve_base_url_custom_overrides_provider(self):
+        """显式 llm_base_url 覆盖 provider 默认值"""
+        from app.config import settings
+
+        saved_provider = settings.llm_provider
+        saved_base_url = settings.llm_base_url
+        try:
+            settings.llm_provider = "zhipu"
+            settings.llm_base_url = "https://my-proxy.example.com/v1"
+            from app.llm.analyzer import _resolve_base_url
+            assert _resolve_base_url() == "https://my-proxy.example.com/v1"
+        finally:
+            settings.llm_provider = saved_provider
+            settings.llm_base_url = saved_base_url
+
+    def test_resolve_base_url_unknown_provider(self):
+        """未知 provider 无默认 base_url"""
+        from app.config import settings
+
+        saved_provider = settings.llm_provider
+        saved_base_url = settings.llm_base_url
+        try:
+            settings.llm_provider = "unknown"
+            settings.llm_base_url = ""
+            from app.llm.analyzer import _resolve_base_url
+            assert _resolve_base_url() == ""
+        finally:
+            settings.llm_provider = saved_provider
+            settings.llm_base_url = saved_base_url
+
+    def test_provider_config_fields_exist(self):
+        """config 中存在 llm_provider 和 llm_base_url 字段"""
+        from app.config import settings
+        assert hasattr(settings, "llm_provider")
+        assert hasattr(settings, "llm_base_url")
+        assert settings.llm_provider in ("openai", "zhipu", "custom", "unknown")
