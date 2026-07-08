@@ -19,6 +19,7 @@ def register_all_tools():
     from app.mcp.tools.ingest_api import INGEST_ERROR_DEF, ingest_error_handler
     from app.mcp.tools.spec_api import RELATED_SPECS_DEF, related_specs_handler
     from app.mcp.tools.verify_api import VERIFY_DEF, verify_handler
+    from app.mcp.tools.verify_ui_api import VERIFY_UI_DEF, verify_ui_handler
 
     register_tool(**debug_tool, handler=debug_handler)
     register_tool(**context_tool, handler=context_handler)
@@ -32,3 +33,4 @@ def register_all_tools():
     register_tool(**INGEST_ERROR_DEF, handler=ingest_error_handler)
     register_tool(**RELATED_SPECS_DEF, handler=related_specs_handler)
     register_tool(**VERIFY_DEF, handler=verify_handler)
+    register_tool(**VERIFY_UI_DEF, handler=verify_ui_handler)
