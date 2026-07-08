@@ -17,6 +17,9 @@ from app.mcp.builders.context import build_context
 from app.api.debug import router as debug_router
 from app.api.mcp_routes import router as mcp_router
 from app.api.ingest import router as ingest_router
+from app.api.dashboard import router as dashboard_router
+from fastapi.responses import HTMLResponse
+import pathlib
 
 # ── 注册 MCP 工具 ──
 from app.mcp.tools import register_all_tools
@@ -97,6 +100,7 @@ setup_observability(app)
 app.include_router(debug_router)
 app.include_router(mcp_router)
 app.include_router(ingest_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/")
@@ -105,7 +109,6 @@ def health():
     """增强健康检查 —— 包含存储层可用性验证"""
     llm_ok = bool(settings.openai_api_key)
 
-    # 检查存储层
     storage_ok = True
     storage_detail = settings.storage_backend
     if settings.storage_backend == "postgresql":
@@ -120,7 +123,6 @@ def health():
             storage_ok = False
             storage_detail = "postgresql (disconnected)"
 
-    # 综合状态
     if llm_ok and storage_ok:
         status = "ok"
     elif not llm_ok and not storage_ok:
@@ -135,6 +137,15 @@ def health():
         "storage": storage_detail,
         "llm_configured": llm_ok,
     }
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    """Web 控制台 —— Trace / Verify 可视化"""
+    dashboard_path = pathlib.Path(__file__).parent / "web" / "dashboard.html"
+    if dashboard_path.exists():
+        return HTMLResponse(dashboard_path.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
 
 
 @app.post("/debug")
