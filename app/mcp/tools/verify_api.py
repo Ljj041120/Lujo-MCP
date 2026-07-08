@@ -73,4 +73,14 @@ def verify_handler(arguments: dict) -> dict:
         spec = dict(spec)
         spec["trace_id"] = trace_id
 
-    return assert_behavior(actual, spec)
+    result = assert_behavior(actual, spec)
+
+    # 有 trace_id 时持久化结果，供 build_debug_context 注入 spec_diffs（V5 闭环）
+    if trace_id:
+        try:
+            from app.mcp.core.logs import add_log
+            add_log(trace_id, "verify", result)
+        except Exception:
+            pass
+
+    return result

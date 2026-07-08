@@ -10,6 +10,7 @@
 - **运行时快照** — 采集系统/进程/解释器状态（CPU、内存、线程等）
 - **LLM 智能分析** — 对接 OpenAI，自动分析错误根因并给出修复建议
 - **MCP 工具集** — 提供标准化的 debug / context / trace / stacktrace 工具
+- **规范驱动 + verify 自动断言** — 定义期望规范，系统自动比对实际结果，检测"返回正常但不符合规范"的静默失败
 
 ## 项目结构
 
@@ -120,6 +121,25 @@ curl -X POST http://localhost:8000/api/debug/analyze \
 ```bash
 curl http://localhost:8000/api/debug/runtime
 ```
+
+#### verify 自动断言（静默失败检测）
+
+```bash
+curl -X POST http://localhost:8000/api/debug/verify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "actual": {"status_code": 200, "body": {"success": true}},
+    "spec": {
+      "kind": "api",
+      "target": "POST /api/login",
+      "expect": {"status": 200, "body_rules": {"success": false}}
+    },
+    "trace_id": "optional-trace-id"
+  }'
+# → {"matched": false, "diffs": [...], "silent_failure": true}
+```
+
+也可通过 MCP 工具 `verify` 调用（stdio / HTTP 传输均可），或用 `spec_id` 引用已存储规范。
 
 #### MCP 工具列表
 
