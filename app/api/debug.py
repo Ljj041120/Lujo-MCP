@@ -179,3 +179,22 @@ def list_sessions():
             for s in sessions
         ],
     }
+
+
+@router.post("/verify")
+def debug_verify(body: dict):
+    """比对实际结果 vs 期望规范，自动检测静默失败。
+
+    请求体：
+      actual: dict         — 实际结果（status_code、body、error 等）
+      spec?: dict          — 期望规范（与 spec_id 二选一）
+      spec_id?: str        — 已存储规范的 ID
+      trace_id?: str       — 关联的 trace_id
+    """
+    from app.mcp.tools.verify_api import verify_handler
+
+    try:
+        return verify_handler(body)
+    except Exception as e:
+        logger.exception("verify 执行失败")
+        raise HTTPException(status_code=500, detail=f"verify 失败: {e}")

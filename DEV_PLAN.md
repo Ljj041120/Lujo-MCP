@@ -1,7 +1,7 @@
 # 开发计划（每日 Review 用）
 
 > 最近更新：2026-07-08
-> 当前进度：参考项目迁移 M1–M10 全部完成。V1-V3 完成（132 passed / 5 skipped）。
+> 当前进度：参考项目迁移 M1–M10 全部完成。V1-V4 完成（139 passed / 5 skipped）。
 > 仓库已清理 `reference/`。工作区干净。
 
 ---
@@ -70,6 +70,7 @@ VerifyResult = { matched, diffs: [Diff], silent_failure, trace_id? }
 - [x] V1 断言引擎（2026-07-08 done，16 tests passed）
 - [x] V2 spec_store（2026-07-08 done，14 tests passed）
 - [x] V3 verify 工具 + 注册（2026-07-08 done，11 tests passed）
+- [x] V4 /api/debug/verify（2026-07-08 done，7 tests passed）
 - [ ] V2 spec_store
 - [ ] V3 verify 工具 + 注册
 - [ ] V4 /api/debug/verify
