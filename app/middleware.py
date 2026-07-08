@@ -54,7 +54,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 # ── 请求体大小限制中间件 ──
 class MaxBodySizeMiddleware(BaseHTTPMiddleware):
-    """防御超大请求体导致的 OOM / DoS（流式分块读取，超限即断）"""
+    """防御超大请求体导致的 OOM / DoS（按 Content-Length 硬检查）"""
 
     async def dispatch(self, request: Request, call_next):
         limit = settings.max_body_size
@@ -71,26 +71,10 @@ class MaxBodySizeMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 return JSONResponse(status_code=400, content={"detail": "无效的 Content-Length"})
 
-        # 对可能带请求体的方法：流式分块读取，超过限制立即拒绝，
-        # 避免把整个请求体缓冲进内存造成内存耗尽。
-        if request.method in ("POST", "PUT", "PATCH"):
-            chunks = []
-            total = 0
-            async for chunk in request.stream():
-                total += len(chunk)
-                if total > limit:
-                    return JSONResponse(
-                        status_code=413,
-                        content={"detail": f"请求体过大，限制 {limit} 字节"},
-                    )
-                chunks.append(chunk)
-            body = b"".join(chunks)
-
-            async def receive():
-                return {"type": "http.request", "body": body, "more_body": False}
-
-            request._receive = receive
-
+        # 注：不在中间件层流式消费 body。
+        # 在 BaseHTTPMiddleware 中读取 body 并靠 request._receive 重放，
+        # 在 Starlette 新版下会失效，导致下游路由收到空 body（422 missing）。
+        # 因此仅靠 Content-Length 硬检查，body 读取交给路由层。
         return await call_next(request)
 
 
