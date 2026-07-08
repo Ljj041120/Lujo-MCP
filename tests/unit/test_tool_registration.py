@@ -14,10 +14,12 @@ def test_all_tools_registered():
         "get_blame_for_frame", "get_recent_diff",
         "ingest_silent_failure", "ingest_error",
         "get_related_specs",
+        # V3 新增
+        "verify",
     }
     missing = expected - names
     assert not missing, f"未注册的工具: {missing}"
-    assert len(names) >= 11
+    assert len(names) >= 12
 
 
 def test_each_registered_tool_has_handler():
