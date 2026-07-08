@@ -141,6 +141,23 @@ curl -X POST http://localhost:8000/api/debug/verify \
 
 也可通过 MCP 工具 `verify` 调用（stdio / HTTP 传输均可），或用 `spec_id` 引用已存储规范。
 
+#### 规范 CRUD
+
+```bash
+# 创建规范
+curl -X POST http://localhost:8000/api/spec \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"api","target":"POST /api/login","expect":{"status":200}}'
+
+# 列出规范（支持 ?kind=api & ?target=login）
+curl http://localhost:8000/api/spec
+
+# 查看/更新/删除
+curl http://localhost:8000/api/spec/{spec_id}
+curl -X PATCH http://localhost:8000/api/spec/{spec_id} -d '{"target":"new"}'
+curl -X DELETE http://localhost:8000/api/spec/{spec_id}
+```
+
 #### MCP 工具列表
 
 ```bash

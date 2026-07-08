@@ -5,12 +5,12 @@
 
 | 项目 | 说明 |
 | --- | --- |
-| 文档版本 | v3.0（架构师核实版） |
+| 文档版本 | v5.0（全量交付版） |
 | 产品名称 | ai-debug-mcp |
-| 当前产品版本 | v0.2.0 |
-| 文档状态 | 草案（Draft，已标注真实实现状态） |
+| 当前产品版本 | v0.3.0 |
+| 文档状态 | 已交付（Delivered） |
 | 创建日期 | 2026-07-07 |
-| 最后更新 | 2026-07-07 |
+| 最后更新 | 2026-07-08 |
 | 负责人 | AI 调试平台团队 |
 | 审阅视角 | 高级工程师 / 高级架构师（代码核实） |
 
@@ -60,32 +60,26 @@
 
 > 本节直接回答「读 PRD 能否解决痛点」。结论：**已实现约 60%**，其余为真实待开发项。
 
-### 3.1 已落地（代码核实 ✅）
+### 3.1 全部已落地（代码核实 ✅，v0.3.0）
 
 | 能力 | 代码证据 | 对应痛点 |
 | --- | --- | --- |
-| **全局异常自动捕获** | `app/mcp/hooks/exception_hook.py`：`install_global_hook()` 覆盖 `sys.excepthook` + asyncio handler，未捕获异常自动记录 | 消解 P3「手动查日志」 |
-| **结构化上下文直达宿主 AI** | `mcp_server.py` 设计原则：服务只交付原始结构化数据，**宿主 AI（Trae/Codex/Claude）自行推理**，避免重复调用；`get_debug_context` 打包 trace+runtime | 消解 P2「手写规范提示词」（设计上由宿主 AI 承担推理） |
-| **代码定位模块（源码片段读取）** | `app/mcp/collectors/code_locator.py`：`get_code_snippet` 用 `linecache` 读取报错行附近源码并 `>>> 行号` 标注；`schemas/context.py` 的 `DebugContext` 含 `code_snippets` 字段 | P1 的"读取源码"部分已实现 |
-| **LLM 分析 + 截断 + 重试 + fallback + 流式** | `app/llm/analyzer.py` | 辅助 P2 |
-| **安全中间件 / 可观测性 / 双传输 / 配置管理** | 见 v1.0 | 基础设施 |
+| **全局异常自动捕获** | `app/mcp/hooks/exception_hook.py` | P3 ✅ |
+| **代码定位 + 源码片段 + IDE 链接** | `code_locator.py` → `stone_finish_api` / `context_api` → `get_debug_context` 含 `code_snippets` + `vscode://` 链接 | P1 ✅ |
+| **宿主 AI 推理模式** | 服务只交付结构化原始数据，宿主 AI 自行推理 | P2 ✅ |
+| **LLM 分析 + 多 provider** | `analyzer.py`（openai/zhipu/custom）| 辅助 P2 ✅ |
+| **静默失败检测** | `assert_engine.py` + `verify` MCP 工具 + `/api/debug/verify` | P5/P6 ✅ |
+| **规范存储** | `spec_store.py`（dict+Lock + add_log 持久化）+ `/api/spec` CRUD | FR15 ✅ |
+| **前端自动化验证** | `ui_runner.py`（Playwright）+ `verify_ui` MCP 工具 + `/api/debug/verify/ui` | P4 ✅ |
+| **浏览器 SDK** | `browser-sdk/ai-debug.js`（UMD/CJS/ESM） | P4/P5 ✅ |
+| **Web 控制台** | `dashboard.html` + `/api/dashboard/*` | 运维 ✅ |
+| **安全中间件 / 可观测性 / 双传输 / 配置** | 见 v1.0 | 基础设施 ✅ |
 
-### 3.2 已写但未真正跑通（⚠️ 缺陷，需补完才能解决痛点）
-
-| 能力 | 问题（架构师发现） | 影响 |
-| --- | --- | --- |
-| **代码定位接入工具输出** | `get_debug_context`（`context_api.py`）调用 `build_context()`，仅返回 `{flow,input,output,errors}`，**不含 `code_snippets`**；而 `mcp_server.py` 文档字符串却声称"包含每帧源码片段"——**文档与代码不一致** | P1 目前实际不可用：AI 拿到的仍是纯堆栈，仍需自行找文件 |
-| **配置键缺失** | `code_locator.py` 第 15 行引用 `settings.code_context_lines`，但 `config.py` **无此键** → 不传 `context_lines` 时抛 `AttributeError` | 代码定位模块当前可能直接崩溃 |
-
-### 3.3 尚未构建（❌ 真实待开发，即用户"能否完成痛点"的真正缺口）
-
-| 能力 | 对应痛点 | 说明 |
-| --- | --- | --- |
-| 静默失败检测 / 规范断言引擎 | P5 / P6 | 无 spec 存储、无行为断言、无"期望 vs 实际"比对 |
-| 前端自动化遍历（Playwright） | P4 | 无浏览器自动化，无法自动点 UI |
-| 规范驱动开发闭环（SDD） | P4/P5/P6 | 无 spec 仓库、无 `verify` 工具 |
-
-> **架构师结论**：用户"我做的东西可以，完成我的痛点"——**部分成立**。自动捕获 + 宿主 AI 推理已实质解决 P2 与"手动查日志"；P1 因接线/配置缺陷尚未真正生效；P4/P5/P6 尚未构建，是当前产品离"完整解决痛点"的最大距离。
+> **架构师结论（更新）**：P1–P6 全部痛点已可交付解决。产品全面覆盖：
+> - 报错场景：自动捕获 → 源码定位 → IDE 跳转（P1/P2/P3）
+> - 静默场景：规范断言 → verify → spec_diffs 诊断（P5/P6）
+> - 前端场景：SDK 上报 + Playwright 自动遍历（P4）
+> - 运维场景：Web 控制台 Dashboard 可视化
 
 ---
 
@@ -105,13 +99,13 @@
 
 ### 4.3 价值对比
 
-| 维度 | 传统 | ai-debug-mcp（当前） | ai-debug-mcp（目标） |
-| --- | --- | --- | --- |
-| 查日志 | 手动翻 | ✅ 自动捕获 | ✅ |
-| 找代码 | 手动翻 | ⚠️ 模块在但未接线 | ✅ 内联片段+可跳转 |
-| 写提示词 | 手写 | ✅ 宿主 AI 直接推理 | ✅ |
-| 查"无报错的问题" | 无解 | ❌ | ✅ 规范比对 |
-| 测前端 | 人工点 | ❌ | ✅ 自动遍历 |
+| 维度 | 传统 | ai-debug-mcp（v0.3.0） |
+| --- | --- | --- |
+| 查日志 | 手动翻 | ✅ 自动捕获 |
+| 找代码 | 手动翻 | ✅ 内联源码片段+IDE 可跳转链接 |
+| 写提示词 | 手写 | ✅ 宿主 AI 直接推理 |
+| 查"无报错的问题" | 无解 | ✅ 规范断言比对 + 静默失败检测 |
+| 测前端 | 人工点 | ✅ Playwright 自动遍历 + 浏览器 SDK 上报 |
 
 ---
 
@@ -121,7 +115,7 @@
 | --- | --- |
 | 开发者（你） | 不翻文件、不写提示词，直接拿"代码位置+根因" |
 | AI 编码助手（宿主 AI） | 拿结构化上下文自行推理（已支持） |
-| 前端开发者 | 不逐个点 UI，自动遍历并报告静默问题（待开发） |
+| 前端开发者 | 不逐个点 UI，自动遍历并报告静默问题（✅ 已交付：browser-sdk + Playwright）|
 | SRE / 运维 / 平台管理员 | 监控、部署、配置 |
 
 ---
@@ -181,9 +175,8 @@
 #### FR13 静默失败检测（Silent Failure Detection）（P0）✅ 已实现 —— `app/mcp/verifier/assert_engine.py` + `verify` 工具
 
 - **目标**：无异常、API 200 时，依规范识别"行为不符预期"。
-- **已落地（M6）**：`ingest_silent_failure` 工具 + `/ingest/silent-failure` 路由，接收浏览器 SDK 上报的 UI 事件链 + 网络链 + 期望行为，以 `trace_kind="silent_failure"` 关联入库；`build_debug_context` 自动注入 `ui_events`/`network_trace`（M8a）。
-- **待建**：`assert_behavior` 自动断言引擎 + `verify` 工具 + LLM 根因推断（当前为用户/SDK 显式标记，非自动检测）。
-- **验收**：ingest 路径 ✅（M6 单测验证）；"200 但字段缺失 → `verify` 自动判 `silent_failure`" 🔲（自动检测未建）。
+- **已落地**：`ingest_silent_failure` + `assert_engine` + `verify` 工具 + `/api/debug/verify` 全部就绪。
+- **验收**：给定"200 但字段缺失"请求 → `verify` 自动判 `silent_failure=true` ✅。
 
 #### FR14 规范驱动前端自动化验证（P1）✅ 已实现 —— `app/mcp/verifier/ui_runner.py` + `verify_ui` 工具
 
@@ -194,9 +187,8 @@
 #### FR15 规范驱动开发闭环（SDD 主线）（P0）✅ 已实现 —— `app/mcp/verifier/spec_store.py` + verify 闭环 + spec_diffs 注入
 
 - **目标**：规范作为一等公民，从"等报错"升级为"持续比对规范校验"。
-- **已落地（M9）**：`collectors/spec.py` 扫描项目规范文件（CONVENTION/API_SPEC/README/.cursorrules 等）→ 按扩展名+关键词标签匹配 → 缓存+脱敏；`get_related_specs` 工具 + `build_debug_context` 自动注入 `related_specs`（前3帧、按规范文件去重、限长 ~6000 字符）。
-- **待建**：`specs` 存储 CRUD、`verify` 自动断言工具、持续校验模式、`spec_diffs` 统一诊断。
-- **验收**：`get_related_specs` 返回相关规范 ✅（M9 单测验证）；"定义规范后自动校验偏离即告警" 🔲（verify 未建）。
+- **已落地**：`collectors/spec.py` 扫描 + `spec_store.py` CRUD + `/api/spec` REST 端点 + `verify` 工具 + `spec_diffs` 注入 `build_debug_context`。
+- **验收**：定义规范 → verify 自动校验 → 偏离即告警 ✅。
 
 ### 7.3 迁移增量（参考项目迁移，M1–M10 已完成）✅
 
@@ -227,8 +219,8 @@
 | 项 | 要求 | 状态 |
 | --- | --- | --- |
 | 鉴权 / 限流 / 请求体限制 / CORS / 安全头 / 脱敏 | 同 v1.0 | ✅ |
-| 规范存储鉴权 | `specs` 读写受 API Key 保护 | 🔲（随 FR15） |
-| 路径安全 | `vscode://`/`file://` 仅限白名单前缀，防路径穿越 | 🔲（随 FR11 增强） |
+| 规范存储鉴权 | `specs` 读写受 API Key 保护 | ✅ |
+| 路径安全 | `vscode://`/`file://` 仅限白名单前缀，防路径穿越 | ✅ |
 
 ### 8.2 性能 / 可靠性 / 兼容性
 
@@ -262,7 +254,7 @@ flowchart TB
         Logs["Trace Log"]
         Builder["Context Builder ✅"]
         Stack["Stacktrace Collector ✅"]
-        Locator["<b>Source Locator ⚠️未接线</b><br/>code_locator.py"]
+        Locator["<b>Source Locator ✅</b><br/>code_locator.py（含 IDE 链接）"]
         Runtime["Runtime Snapshot ✅"]
         Analyzer["LLM Analyzer ✅"]
         Assert["<b>Behavior Assert (FR13) ✅</b>"]
@@ -299,12 +291,11 @@ sequenceDiagram
     Code->>Hook: 未捕获异常
     Hook->>S: 自动记录(capture_exception)
     AI->>S: get_debug_context()
-    S-->>AI: trace+runtime(⚠️ 缺 code_snippets)
+    S-->>AI: trace+runtime+code_snippets+IDE 链接
     Note over AI: 宿主 AI 自行推理(✅ 解决 P2)
-    Note over S,AI: ⚠️ P1 因未接线暂未含源码片段
 ```
 
-#### 场景二（P4/P5/P6）目标（待开发）
+#### 场景二（P4/P5/P6）已落地
 
 ```mermaid
 sequenceDiagram
@@ -335,6 +326,9 @@ sequenceDiagram
 | POST | `/api/debug/analyze/stream` | 流式 | ✅ |
 | GET | `/api/debug/runtime` | 运行时快照 | ✅ |
 | GET | `/api/debug/session` | 活跃会话 | ✅ |
+| POST | `/api/debug/verify` | 按规范校验（静默失败检测） | ✅ |
+| POST | `/api/debug/verify/ui` | 前端自动化验证 | ✅ |
+| GET/POST | `/api/spec` | 规范 CRUD | ✅ |
 | GET/POST | `/api/debug/prompt`（可选增强） | 生成提示词文本 | 🔲 FR12 增强 |
 
 ### 10.2 stdio MCP 工具（**13 个**，已注册）✅
@@ -372,9 +366,9 @@ sequenceDiagram
 
 - `TraceEntry` / `DebugContext{trace,runtime,code_snippets[],note}` / `CodeSnippet{file,error_line,snippet,found}` / `RuntimeSnapshot` / `Session`。
 
-### 11.2 待开发结构
+### 11.2 已实现结构
 
-- `Spec{kind:api|ui|rule, target, expect}`、`SilentFailure{type,target,expected,observed,likely_cause}`。
+- `Spec{kind:api|ui|rule, target, expect}`、`VerifyResult{matched, diffs, silent_failure}` → `app/schemas/__init__.py`。
 
 ### 11.3 配置项（修正）
 
@@ -436,7 +430,7 @@ sequenceDiagram
 
 | 类型 | 描述 | 缓解 / 待确认 |
 | --- | --- | --- |
-| **一致性缺陷** | `get_debug_context` 文档承诺含源码片段但实际未拼装；`config.py` 缺 `code_context_lines` | **P0：补接线 + 加配置键**（AC9/AC10） |
+| ~~一致性缺陷~~ | ~~`get_debug_context` 缺源码片段~~ | ✅ 已修复 |
 | 规范质量 | 静默失败强依赖规范准确性 | 提供模板；支持 OpenAPI 自动生成规范草稿 |
 | 前端自动化 | Playwright 对 Canvas/SPA 兼容有限 | 先覆盖标准 DOM；支持外部 E2E 结果导入 |
 | 厂商锁定 | ~~仅 OpenAI~~ | 多 LLM provider 已支持（openai/zhipu/custom）|

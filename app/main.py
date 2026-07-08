@@ -18,6 +18,7 @@ from app.api.debug import router as debug_router
 from app.api.mcp_routes import router as mcp_router
 from app.api.ingest import router as ingest_router
 from app.api.dashboard import router as dashboard_router
+from app.api.spec import router as spec_router
 from fastapi.responses import HTMLResponse
 import pathlib
 
@@ -34,7 +35,7 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     setup_logging()
     logger.info(
-        f"服务启动 | {settings.service_name} v0.2.0 | "
+        f"服务启动 | {settings.service_name} v0.3.0 | "
         f"storage={settings.storage_backend} | "
         f"llm={settings.llm_model} | "
         f"auth={'on' if settings.api_key else 'off'} | "
@@ -80,7 +81,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.service_name,
     description="基于 MCP 协议的 AI 智能调试服务",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -101,6 +102,7 @@ app.include_router(debug_router)
 app.include_router(mcp_router)
 app.include_router(ingest_router)
 app.include_router(dashboard_router)
+app.include_router(spec_router)
 
 
 @app.get("/")
@@ -133,7 +135,7 @@ def health():
     return {
         "status": status,
         "service": settings.service_name,
-        "version": "0.2.0",
+        "version": "0.3.0",
         "storage": storage_detail,
         "llm_configured": llm_ok,
     }
