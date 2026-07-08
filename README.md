@@ -1,6 +1,6 @@
 # ai-debug-mcp
 
-基于 MCP（Model Context Protocol）协议的 AI 智能调试服务。
+基于 MCP（Model Context Protocol）协议的 AI 智能调试服务 —— 规范驱动 + 静默失败检测 + 多 Agent 协同。
 
 ## 功能
 
@@ -68,11 +68,19 @@ pip install -r requirements.txt
 
 ### 2. 配置环境变量
 
-编辑 `.env` 文件，填入你的 OpenAI API Key：
+编辑 `.env` 文件（开发最小配置）：
 
 ```
 OPENAI_API_KEY=sk-your-key-here
 LLM_MODEL=gpt-4
+```
+
+生产部署额外配置（业务代码零改动）：
+
+```
+STORAGE_BACKEND=postgresql   # memory | postgresql
+API_KEY=your-secret          # 开启 fail-closed 鉴权
+LLM_PROVIDER=openai          # openai | zhipu | custom
 ```
 
 ### 3. 启动服务
@@ -89,7 +97,7 @@ python -m app.main
 
 ```bash
 curl http://localhost:8000/
-# → {"status":"ok","service":"ai-debug-mcp","version":"0.1.0"}
+# → {"status":"ok","service":"ai-debug-mcp","version":"0.3.0"}
 ```
 
 #### 快速调试
@@ -158,10 +166,15 @@ curl -X PATCH http://localhost:8000/api/spec/{spec_id} -d '{"target":"new"}'
 curl -X DELETE http://localhost:8000/api/spec/{spec_id}
 ```
 
-#### MCP 工具列表
+#### MCP 工具列表（共 13 个）
+
+通过 JSON-RPC 在 `/mcp` 端点调用（需先 initialize 握手拿 `Mcp-Session-Id`）：
 
 ```bash
-curl -X POST http://localhost:8000/mcp/tools/list
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: <session>" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 ## MCP 传输（两种模式）
@@ -230,6 +243,9 @@ python examples/error_demo.py
 ## 技术栈
 
 - **Web 框架**: FastAPI + Uvicorn
-- **AI**: OpenAI API (GPT-4)
+- **AI**: OpenAI API（多 provider：openai / zhipu / custom）
 - **系统监控**: psutil
-- **协议**: MCP (Model Context Protocol)
+- **协议**: MCP (Model Context Protocol, JSON-RPC 2.0)
+- **前端自动化**: Playwright（可选依赖，未安装不影响核心功能）
+- **存储**: memory（默认）/ PostgreSQL（psycopg2，工厂模式一行切换）
+- **测试**: pytest
