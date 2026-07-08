@@ -16,10 +16,12 @@ def test_all_tools_registered():
         "get_related_specs",
         # V3 新增
         "verify",
+        # FR14 新增
+        "verify_ui",
     }
     missing = expected - names
     assert not missing, f"未注册的工具: {missing}"
-    assert len(names) >= 12
+    assert len(names) >= 13
 
 
 def test_each_registered_tool_has_handler():

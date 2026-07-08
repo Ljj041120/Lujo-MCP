@@ -198,3 +198,21 @@ def debug_verify(body: dict):
     except Exception as e:
         logger.exception("verify 执行失败")
         raise HTTPException(status_code=500, detail=f"verify 失败: {e}")
+
+
+@router.post("/verify/ui")
+def debug_verify_ui(body: dict):
+    """按 UI 规范启动 Playwright 自动遍历页面并验证交互结果（FR14）。
+
+    请求体：
+      spec?: dict          — UI 规范 {kind:'ui', target, expect:{interactions:[...]}}
+      spec_id?: str        — 已存储规范的 ID
+      timeout_ms?: int     — 单个操作超时毫秒
+    """
+    from app.mcp.tools.verify_ui_api import verify_ui_handler
+
+    try:
+        return verify_ui_handler(body)
+    except Exception as e:
+        logger.exception("verify_ui 执行失败")
+        raise HTTPException(status_code=500, detail=f"verify_ui 失败: {e}")

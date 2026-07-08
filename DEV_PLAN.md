@@ -1,8 +1,8 @@
 # 开发计划（每日 Review 用）
 
 > 最近更新：2026-07-08
-> 当前进度：参考项目迁移 M1–M10 全部完成。V1-V5 verify 自动断言全部完成（143 passed / 5 skipped）。
-> 仓库已清理 `reference/`。工作区干净。
+> 当前进度：参考项目迁移 M1–M10 ✅。V1-V5 verify ✅。多 LLM provider ✅。Web 控制台 ✅。
+> 浏览器 SDK TS + Playwright UI 遍历 + verify_ui 工具 ✅。全量 162 passed / 6 skipped。
 
 ---
 
@@ -55,8 +55,8 @@ VerifyResult = { matched, diffs: [Diff], silent_failure, trace_id? }
 | --- | --- | --- | --- |
 | 中 | 多 LLM provider | 内置 analyzer 抽 `LLMProvider`，支持智谱 GLM（OpenAI 兼容 base_url）/ 本地 | ~1 文件 | ✅ done（2026-07-08，5 tests）|
 | 低 | Web 控制台 | 可视化 trace / 静默失败 / verify 结果 | 较大，独立阶段 | ✅ done（2026-07-08，7 tests）|
-| 低 | 浏览器 SDK TS | 前端开箱即用（后端 ingest 已就绪） | 复制+适配 |
-| 低 | Playwright 自动遍历 | FR14，前端 UI 自动点击遍历 | 较大 |
+| 低 | 浏览器 SDK TS | 前端开箱即用（后端 ingest 已就绪） | 复制+适配 | ✅ done（2026-07-08，browser-sdk/ai-debug.js）|
+| 低 | Playwright 自动遍历 | FR14，前端 UI 自动点击遍历 | 较大 | ✅ done（2026-07-08，7 tests + verify_ui 工具 + REST 端点）|
 
 ---
 
