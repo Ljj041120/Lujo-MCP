@@ -86,3 +86,31 @@ def test_build_debug_context_includes_related_specs_key():
     assert "related_specs" in ctx
     # 值为 list 或 None（取决于项目是否存在匹配规范）
     assert ctx["related_specs"] is None or isinstance(ctx["related_specs"], list)
+
+
+def test_build_debug_context_injects_spec_diffs():
+    """verify 结果（spec_diffs）注入 build_debug_context（V5 闭环）。"""
+    from app.mcp.tools.verify_api import verify_handler
+
+    tid = trace_repo.save_trace("E", "m", [])
+    # 对该 trace 做 verify，结果会持久化
+    verify_handler({
+        "actual": {"status_code": 200, "body": {"name": "Bob"}},
+        "spec": {"kind": "api", "expect": {"body_rules": {"name": "Alice"}}},
+        "trace_id": tid,
+    })
+
+    ctx = build_debug_context(tid)
+    assert ctx is not None
+    assert ctx["spec_diffs"] is not None
+    assert len(ctx["spec_diffs"]) == 1
+    assert ctx["spec_diffs"][0]["matched"] is False
+    assert ctx["spec_diffs"][0]["silent_failure"] is True
+
+
+def test_build_debug_context_spec_diffs_none_when_no_verify():
+    """无 verify 结果时 spec_diffs=None。"""
+    tid = trace_repo.save_trace("E", "m", [])
+    ctx = build_debug_context(tid)
+    assert ctx is not None
+    assert ctx["spec_diffs"] is None

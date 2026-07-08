@@ -96,6 +96,13 @@ def build_debug_context(trace_id: str | None = None, include_runtime: bool = Tru
     except Exception:
         ui_events = None
 
+    # verify 断言结果（spec_diffs，V5 闭环）
+    try:
+        from app.mcp.core.logs import get_logs
+        spec_diffs = [e["data"] for e in get_logs(tid) if e.get("step") == "verify"] or None
+    except Exception:
+        spec_diffs = None
+
     # 相关规范片段（前 3 帧所在文件，按规范文件去重，限总长 ~6000 字符）
     related_specs: list = []
     _seen_spec_files: set = set()
@@ -150,5 +157,6 @@ def build_debug_context(trace_id: str | None = None, include_runtime: bool = Tru
         "related_specs": related_specs or None,
         "network_trace": network_trace,
         "ui_events": ui_events,
+        "spec_diffs": spec_diffs,
         "runtime": runtime,
     }

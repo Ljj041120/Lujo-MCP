@@ -46,6 +46,38 @@ class TestVerifyWithInlineSpec:
         assert result["trace_id"] == "trace-xyz"
 
 
+class TestVerifyPersistence:
+
+    def test_verify_persists_with_trace_id(self):
+        """有 trace_id 时，verify 结果持久化到 logs（step=verify）"""
+        from app.mcp.core.logs import get_logs
+
+        result = verify_handler({
+            "actual": {"status_code": 200, "body": {"name": "Bob"}},
+            "spec": {"kind": "api", "expect": {"body_rules": {"name": "Alice"}}},
+            "trace_id": "trace-persist-1",
+        })
+        assert result["silent_failure"] is True
+
+        # 从 logs 取回
+        verify_logs = [e for e in get_logs("trace-persist-1") if e.get("step") == "verify"]
+        assert len(verify_logs) == 1
+        assert verify_logs[0]["data"]["matched"] is False
+        assert verify_logs[0]["data"]["silent_failure"] is True
+
+    def test_verify_no_persist_without_trace_id(self):
+        """无 trace_id 时不持久化"""
+        from app.mcp.core.logs import get_logs
+
+        verify_handler({
+            "actual": {"status_code": 200, "body": {}},
+            "spec": {"kind": "api", "expect": {"status": 200}},
+        })
+        # 不应该有 verify 日志（用唯一 key 确认）
+        verify_logs = [e for e in get_logs("no-trace-here") if e.get("step") == "verify"]
+        assert len(verify_logs) == 0
+
+
 class TestVerifyWithSpecId:
 
     def test_spec_id_found(self):
