@@ -26,6 +26,7 @@ logger = logging.getLogger("ai-debug-mcp.trace_repo")
 _STEP_META = "trace_meta"      # trace_kind / extra 元信息
 _STEP_NETWORK = "network"
 _STEP_UI = "ui_event"
+_STEP_CONSOLE = "console"
 
 
 def _new_id(prefix: str = "rec") -> str:
@@ -167,3 +168,39 @@ def save_ui_event(
 def get_ui_events(trace_id: str) -> list[dict]:
     """查询与某 trace 关联的所有 UI 事件（按时间顺序）。"""
     return [e["data"] for e in get_logs(trace_id) if e.get("step") == _STEP_UI]
+
+
+# ── console ──
+def save_console_log(
+    level: str = "info",
+    message: str = "",
+    source: str = "browser_sdk",
+    extra: Optional[dict] = None,
+    trace_id: Optional[str] = None,
+    request_id: Optional[str] = None,
+) -> str:
+    """保存一条控制台日志，返回 record_id。
+
+    存储边界统一脱敏 message。
+    """
+    key = trace_id or request_id or _new_id("console")
+    record_id = _new_id("console")
+    payload = {
+        "record_id": record_id,
+        "trace_id": trace_id,
+        "request_id": request_id,
+        "timestamp": time.time(),
+        "level": level or "info",
+        "message": redact(message or ""),
+        "source": source,
+    }
+    if extra:
+        payload["extra"] = extra
+
+    add_log(key, _STEP_CONSOLE, payload)
+    return record_id
+
+
+def get_console_logs(trace_id: str) -> list[dict]:
+    """查询与某 trace 关联的所有控制台日志（按时间顺序）。"""
+    return [e["data"] for e in get_logs(trace_id) if e.get("step") == _STEP_CONSOLE]

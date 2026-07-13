@@ -65,3 +65,26 @@ def test_invalid_extra_pattern_skipped():
     settings.redaction_extra_patterns = "(unclosed\npassword = \"x\""
     # 无效正则被跳过，默认规则仍生效
     assert redact('password = "x"') == 'password="***"'
+
+
+def test_json_password_masked():
+    assert redact('{"password":"123456"}') == '{"password":"***"}'
+    assert redact('{"pwd":"secret"}') == '{"pwd":"***"}'
+    assert redact('{"passwd":"abc"}') == '{"passwd":"***"}'
+
+
+def test_json_api_key_token_masked():
+    assert redact('{"api_key":"sk-xxx"}') == '{"api_key":"***"}'
+    assert redact('{"token":"abc"}') == '{"token":"***"}'
+    assert redact('{"secret":"xyz"}') == '{"secret":"***"}'
+    assert redact('{"authorization":"Bearer xxx"}') == '{"authorization":"***"}'
+
+
+def test_json_nested_password_masked():
+    assert redact('{"user":{"password":"123"}}') == '{"user":{"password":"***"}}'
+    assert redact('{"data":{"api_key":"sk-123"}}') == '{"data":{"api_key":"***"}}'
+
+
+def test_json_no_false_positive():
+    assert redact('{"username":"admin"}') == '{"username":"admin"}'
+    assert redact('{"email":"test@example.com"}') == '{"email":"test@example.com"}'

@@ -15,19 +15,33 @@ services:
       timeout: 3s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   app:
     build: .
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       STORAGE_BACKEND: postgresql
+      STATE_BACKEND: redis
       PG_HOST: postgres
       PG_PORT: 5432
       PG_DATABASE: ai_debug_mcp
       PG_USER: postgres
       PG_PASSWORD: postgres
-      # 下面两项从宿主机 .env 读取（如未设置则用默认值）
+      REDIS_URL: redis://redis:6379/0
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o}
       API_KEY: ${API_KEY:-}

@@ -95,3 +95,82 @@ def test_ingest_error_route_missing_fields_defaults():
     resp = client.post("/ingest/error", json={"message": "something broke"})
     assert resp.status_code == 200
     assert resp.json()["saved"] is True
+
+
+def test_ingest_console_persists_record():
+    from app.mcp.tools import console_api
+    import uuid
+
+    trace_id = "test-console-" + str(uuid.uuid4())[:8]
+    res = console_api.tool_ingest_console(
+        level="error",
+        message="something went wrong",
+        source="browser-sdk",
+        extra={"session_id": "test-session"},
+        trace_id=trace_id,
+    )
+    assert res["saved"] is True
+    assert "console-" in res["record_id"]
+
+    logs = trace_repo.get_console_logs(trace_id)
+    assert len(logs) >= 1
+    latest = logs[-1]
+    assert latest["level"] == "error"
+    assert latest["message"] == "something went wrong"
+    assert latest["source"] == "browser-sdk"
+
+
+def test_ingest_console_redacts_message():
+    from app.mcp.tools import console_api
+    import uuid
+
+    trace_id = "test-console-redact-" + str(uuid.uuid4())[:8]
+    res = console_api.tool_ingest_console(
+        level="warn",
+        message='api_key = "secret-token-123"',
+        trace_id=trace_id,
+    )
+    logs = trace_repo.get_console_logs(trace_id)
+    assert len(logs) >= 1
+    latest = logs[-1]
+    assert "secret-token-123" not in latest["message"]
+    assert "***" in latest["message"]
+
+
+def test_ingest_console_trace_id_association():
+    from app.mcp.tools import console_api
+    import uuid
+
+    trace_id = "test-console-assoc-" + str(uuid.uuid4())[:8]
+    res = console_api.tool_ingest_console(
+        level="error",
+        message="error with trace",
+        trace_id=trace_id,
+    )
+    logs = trace_repo.get_console_logs(trace_id)
+    assert len(logs) >= 1
+    latest = logs[-1]
+    assert latest["trace_id"] == trace_id
+    assert latest["record_id"] == res["record_id"]
+
+
+def test_ingest_console_route_via_testclient():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.ingest import router
+
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    resp = client.post("/ingest/console", json={
+        "level": "error",
+        "message": "test console error",
+        "source": "browser-sdk",
+        "extra": {"session_id": "test-session"},
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["saved"] is True
+    assert "console-" in body["record_id"]

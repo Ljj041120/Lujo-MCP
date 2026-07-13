@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException
 from app.mcp.tools.network_api import tool_ingest_network, tool_get_network_trace
 from app.mcp.tools.silent_failure_api import tool_ingest_silent_failure
 from app.mcp.tools.ingest_api import tool_ingest_error
+from app.mcp.tools.console_api import tool_ingest_console
+from app.mcp.core.trace_repo import save_ui_event
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
@@ -63,5 +65,35 @@ def ingest_error(req: dict):
             source=req.get("source", "http_ingest"),
             extra=req.get("extra"),
         )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"上报失败: {e}")
+
+
+@router.post("/console")
+def ingest_console(req: dict):
+    """浏览器 SDK 上报控制台日志，复用 ingest_console 工具逻辑。"""
+    try:
+        return tool_ingest_console(
+            level=req.get("level", "info"),
+            message=req.get("message", ""),
+            source=req.get("source", "browser_sdk"),
+            extra=req.get("extra"),
+            trace_id=req.get("trace_id"),
+            request_id=req.get("request_id"),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"上报失败: {e}")
+
+
+@router.post("/ui-event")
+def ingest_ui_event(req: dict):
+    """浏览器 SDK 上报 UI 事件，复用 save_ui_event 落库。"""
+    try:
+        event_id = save_ui_event(
+            event=req.get("event", {}) or {},
+            trace_id=req.get("trace_id"),
+            extra=req.get("extra"),
+        )
+        return {"event_id": event_id, "saved": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"上报失败: {e}")

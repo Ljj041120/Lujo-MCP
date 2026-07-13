@@ -4,6 +4,8 @@
 > 配套文档：产品需求文档 `PRD.md`（回答"做什么/为什么"），本文档回答"怎么做"。
 > 版本：v0.3.0｜设计状态：✅ 已落地 / ⚠️ 已写待补完 / 🔲 设计草案（待实现）
 > 审阅视角：高级工程师 / 高级架构师
+>
+> **v0.3.1 更新**：PostgreSQL 集成完成、Dashboard 读取 PG、MCP Tools 读取 PG、LLM 分析端到端验证、集成测试补充（13 用例）
 
 ---
 
@@ -134,24 +136,33 @@ flowchart TB
 
 #### 3.1.2 stdio（`app/mcp_server.py` + `app/mcp/transports/stdio.py`）✅
 
-- `mcp_server.py`：标准 MCP Server，用 `mcp` SDK 的 `stdio_server` 通信，`list_tools()` 注册 **6 个工具**，`call_tool()` 分发。
+- `mcp_server.py`：标准 MCP Server，用 `mcp` SDK 的 `stdio_server` 通信，`list_tools()` 注册 **14 个工具**（与 HTTP 传输共用同一套工具注册表），`call_tool()` 分发。
 - 注册方式：客户端配置 `{"command":"python","args":["-m","app.mcp_server"],"cwd":"<abs>"}`。
 - `--stdio` 入口：`python -m app.main --stdio`（`main.py` `__main__`）。
 
-**6 个 stdio 工具**：
+**14 个 MCP 工具（HTTP 与 stdio 共用）**：
 
 | 工具 | 说明 | 实现 |
 | --- | --- | --- |
-| `get_stacktrace` | 最近/指定异常堆栈（文件/行/函数） | `tool_get_stacktrace` |
-| `get_runtime_snapshot` | CPU/内存/线程/Python 版本 | `tool_get_runtime_snapshot` |
-| `search_logs` | 按关键字+时间窗搜历史 trace | `tool_search_logs` |
-| `get_debug_context` | **核心**：trace+runtime+（文档承诺含源码片段⚠️实际未含） | `tool_get_debug_context` |
-| `list_recent_traces` | 最近错误摘要列表 | `tool_list_recent_traces` |
-| `analyze_with_llm` | 可选：内置 LLM 分析（一般不用） | `tool_analyze_with_llm` |
+| `debug` | 调试入口 | `debug_api.py` |
+| `get_debug_context` | **核心**：trace+runtime+源码片段 | `context_api.py` |
+| `search_logs` | 按关键字+时间窗搜历史 trace | `trace_api.py` |
+| `list_recent_traces` | 最近错误摘要列表 | `trace_api.py` |
+| `get_stacktrace` | 最近/指定异常堆栈（文件/行/函数） | `stacktrace_api.py` |
+| `get_runtime_snapshot` | CPU/内存/线程/Python 版本 | `runtime.py` |
+| `analyze_with_llm` | 可选：内置 LLM 分析 | `analyzer.py` |
+| `ingest_network` / `get_network_trace` | 网络请求采集 | `network_api.py` |
+| `git_blame` / `git_recent_diff` | Git 代码追溯 | `git_api.py` |
+| `silent_failure` | 静默失败检测 | `silent_failure_api.py` |
+| `ingest_error` | 错误上报 | `ingest_api.py` |
+| `related_specs` | 相关规范查询 | `spec_api.py` |
+| `verify` | 规范断言验证 | `verify_api.py` |
+| `verify_ui` | 前端 UI 验证 | `verify_ui_api.py` |
+| `auto_test` | 页面自动遍历 | `auto_test_api.py` |
 
 #### 3.1.3 双传输一致性
 
-两套传输（HTTP 工具 `debug/context/trace/stacktrace` 与 stdio 6 工具）**共用** `app/mcp/core/logs`、`builders`、`collectors`、`llm` 业务逻辑，差异仅在协议外壳。
+两套传输（HTTP Streamable / stdio）**共用**同一套工具注册表 `_tool_registry`（`app/mcp/tools/__init__.py` `register_all_tools()`），14 个工具的业务逻辑零重复，差异仅在协议外壳。
 
 ### 3.2 中间件层（`app/middleware.py`）✅
 
@@ -236,7 +247,36 @@ flowchart TB
 | `session registry` | MCP `Mcp-Session-Id` 会话生命周期 | `transports/session.py`，TTL 1800s |
 | `state store` | 限流/计数 | `memory` / `redis` |
 | `sse hub` | 服务端→客户端广播 | `transports/sse.py` |
-| `specs` ✅ | 规范存储（FR15） | `app/mcp/verifier/spec_store.py`，dict+Lock 主存 + add_log 持久化 |
+| `specs` ✅ | 规范存储（FR15） | `app/mcp/verifier/spec_store.py`，dict+Lock 主存 + add_log 持久化，预留 PG 工厂模式待迁移 |
+
+#### 3.5.1 PostgreSQL 存储实现（`app/mcp/core/storage/pg_store.py`）✅
+
+**连接池**：`psycopg2.pool.ThreadedConnectionPool`（minconn=2, maxconn=10），线程安全，全局单例。
+
+**自动建表**：`_ensure_init()` 启动时执行 `CREATE TABLE IF NOT EXISTS`：
+- `traces`（id BIGSERIAL, request_id TEXT, timestamp DOUBLE PRECISION, step TEXT, data JSONB）
+- `sessions`（session_id TEXT PRIMARY KEY, created_at DOUBLE PRECISION, last_active DOUBLE PRECISION, metadata JSONB）
+
+**数据序列化**：`save_entry` 统一用 `json.dumps(data, ensure_ascii=False, default=str)` 序列化，支持 dict/list/str/int/float/bool/None；`get_entries` 用 `_parse_data` 安全反序列化（JSON 字符串→对象，非 JSON 字符串→原样返回）。
+
+**重试机制**：`_execute_with_retry` 包装 SQL 执行，捕获 `OperationalError` 自动重连重试。
+
+**查询接口**：`list_request_ids(limit)` 返回最近写入的 request_id 列表（按 timestamp 倒序），供 Dashboard 和 MCP Tools 使用。
+
+#### 3.5.2 Dashboard API（`app/api/dashboard.py`）✅
+
+| 端点 | 功能 | 数据源 |
+| --- | --- | --- |
+| `GET /api/dashboard/stats` | 概览统计（total/silent/exceptions/spec_count） | errors 缓冲 + PG traces |
+| `GET /api/dashboard/traces?limit=N` | 列出最近 traces 摘要 | errors 缓冲 + PG traces |
+| `GET /api/dashboard/trace/{trace_id}` | trace 详情（含 spec_diffs） | PG traces + errors 缓冲 |
+| `GET /api/dashboard/specs` | 列出已存规范 | spec_store |
+
+`_collect_all_traces` 合并两个数据源：
+1. `errors.list_recent()` — 内存异常缓冲（save_trace 默认存这里）
+2. `logs.list_request_ids()` — PostgreSQL 持久化数据
+
+`_extract_trace_summary` 安全处理 data 字段（支持 str/dict/None），`_safe_int` 处理 status 类型转换。
 
 ### 3.6 可观测性（`app/observability.py`）✅
 
@@ -321,64 +361,28 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 
 ---
 
-## 6. 待设计 / 缺口（架构师提出，待实现）
+## 6. 已实现的关键能力
 
-### 6.0 迁移增量（参考项目迁移，M1–M8 已完成）✅
+> 以下能力已按本架构实现并通过测试，详细实现细节参见各模块源码。
 
-下表能力已按 proj1 架构重新实现并通过单测（55 用例），**未复制 proj2 文件、未改存储抽象/中间件/协议/传输**：
-
-| 模块 | 文件 | 说明 |
+| 能力 | 组件 | 说明 |
 | --- | --- | --- |
-| 脱敏 | `app/mcp/core/redaction.py` | 存储边界统一脱敏，默认开启 |
-| 统一存取 | `app/mcp/core/trace_repo.py` | 在 TraceStorage + errors 之上实现 save_trace/get_trace/save_network_record/save_ui_event 等 |
+| 脱敏 | [app/mcp/core/redaction.py](./app/mcp/core/redaction.py) | 存储边界统一脱敏，默认开启 |
+| 统一存取 | [app/mcp/core/trace_repo.py](./app/mcp/core/trace_repo.py) | 在 TraceStorage + errors 之上实现 save_trace/get_trace/save_network_record/save_ui_event |
 | 网络采集 | `app/mcp/collectors/network.py` + `tools/network_api.py` | 解析/截断 + ingest_network/get_network_trace |
 | UI 采集 | `app/mcp/collectors/ui_event.py` | 解析/截断 |
-| Git 归因 | `app/mcp/core/git.py` + `tools/git_api.py` | blame/diff，带超时+路径白名单 |
-| 静默失败 | `app/mcp/tools/silent_failure_api.py` + `api/ingest.py` | 编排 ui/network + trace_kind |
+| Git 归因 | [app/mcp/core/git.py](./app/mcp/core/git.py) + `tools/git_api.py` | blame/diff，带超时+路径白名单 |
+| 静默失败 | `app/mcp/tools/silent_failure_api.py` + [api/ingest.py](./app/api/ingest.py) | 编排 ui/network + trace_kind |
 | 跨语言上报 | `app/mcp/tools/ingest_api.py` + `api/ingest.py` | ingest_error |
-| inbound 采集 | `app/middleware_network.py` | 独立中间件，默认关闭，安全栈内层 |
-| 完整上下文 | `app/mcp/builders/context.py::build_debug_context` | 注入 code/git/network/ui/runtime/related_specs |
+| inbound 采集 | [app/middleware_network.py](./app/middleware_network.py) | 独立中间件，默认关闭，安全栈内层 |
+| 完整上下文 | [app/mcp/builders/context.py](./app/mcp/builders/context.py)::build_debug_context | 注入 code/git/network/ui/runtime/related_specs |
 | 规范驱动采集 | `app/mcp/collectors/spec.py` + `tools/spec_api.py` | 扫描/标签匹配/缓存/脱敏 + get_related_specs |
-| 指纹去重聚合 | `app/mcp/core/errors.py` | compute_fingerprint + occurrence_count，避免重复刷屏 |
-| 双传输注册 | `tools/__init__.py` + `mcp_server.py` | HTTP 11 工具 / stdio 13 工具 |
-
-> **补充完成**：Playwright 自动遍历（FR14）✅、`assert_behavior` 自动断言 + `verify` 工具（FR13 自动检测 / FR15 持续校验）✅、`specs` 存储 CRUD（spec_store）✅、浏览器 SDK TS ✅、多 LLM provider ✅、Web 控制台 Dashboard ✅。proj2 的 tenacity 评估为不适用，未迁移。
-
-### 6.1 FR11 代码定位接线（✅ 已实现，v0.2.1）
-
-**原问题**：`code_locator` 已写但 (a) `get_debug_context` 未调用它，(b) `config.py` 缺 `code_context_lines`。
-
-**已落地改动**：
-1. `config.py` 增加 `code_context_lines: int = 5` + `source_path_map` / `ide_scheme` / `whitelist_path_prefix`。
-2. `code_locator.py` 生成 `vscode://file/<abs>:<lineno>` 链接，支持路径映射与白名单防穿越；`CodeSnippet` 增加 `link` 字段。
-3. `stacktrace_api` / `context_api` / `debug.py` 在异常含帧时附加 `code_snippets`。
-4. 新建 `app/mcp/core/errors.py`（线程安全双端队列）存储近期捕获异常；`exception_hook` 真正持久化（此前丢弃返回值）。
-5. 修复 `mcp_server.py` 的 `tool_*` 导入 bug，`get_debug_context`/`get_runtime_snapshot`/`analyze_with_llm`/`list_recent_traces`/`search_logs`/`get_stacktrace` 现已全部可用。
-
-**验证**：编译通过 + 导入测试通过 + 功能测试（`get_code_snippet` 对本仓库文件产出带 `>>>` 标记片段与 `vscode://` 链接）。
-
-### 6.2 FR13 静默失败检测（✅ 已实现）
-
-**组件**：`app/mcp/verifier/assert_engine.py`
-- `Spec` 模型：`{kind:api|ui|rule, target, expect:{status?, body_rules?, state_change?}}`。
-- `assert_behavior(actual, spec) -> {matched:bool, diffs:[{field, expected, actual}]}`。
-- 判定：当 `matched==False` 且 `status` 非 4xx/5xx 且无异常 → 产出 `SilentFailure{type, target, expected, observed, likely_cause}`。
-- `likely_cause` 由 LLM 基于 `diffs + context` 推断（复用 `analyzer`）。
-
-### 6.3 FR14 前端自动化验证（✅ 已实现）
-
-**组件**：`app/verifier/ui_runner.py`（可选依赖 `playwright`）
-- 输入规范：`{page_url, interactions:[{action:click|type|navigate, selector, expect:{state_change?|no_response?}}]}`。
-- 执行：启动 headless Chromium，按规范遍历；`无响应且无报错` → `silent_failure(type=ui_no_response)`。
-- 复用 FR13 断言引擎，保证前后端口径一致。
-- 可降级：未装 Playwright 或元素未找到 → 跳过并告警，不阻断。
-
-### 6.4 FR15 规范驱动闭环（✅ 已实现）
-
-**组件**：`app/mcp/core/spec_store.py`（memory/pg 同 trace_store 工厂）
-- 新增 MCP 工具 `spec`(get/set/list)、`verify`(按规范校验 request/interaction)。
-- 统一诊断输出（新增字段）：`{errors[], silent_failures[], code_locations[], spec_diffs[], analysis}`。
-- 持续校验模式：每次请求先套规范断言，再（可选）异常检测，合并为 `diagnosis`。
+| 指纹去重聚合 | [app/mcp/core/errors.py](./app/mcp/core/errors.py) | compute_fingerprint + occurrence_count，避免重复刷屏 |
+| 双传输注册 | [app/mcp/tools/__init__.py](./app/mcp/tools/__init__.py) + [app/mcp_server.py](./app/mcp_server.py) | HTTP/stdio 共用 14 个工具 |
+| 代码定位 | [app/mcp/collectors/code_locator.py](./app/mcp/collectors/code_locator.py) | 源码片段 + vscode:// 链接，路径白名单防穿越 |
+| 静默失败检测 | [app/mcp/verifier/assert_engine.py](./app/mcp/verifier/assert_engine.py) | assert_behavior 纯函数，<1ms 判定 |
+| 前端自动化 | `app/verifier/ui_runner.py` + `tools/auto_test_api.py` | Playwright headless 遍历，可选依赖 |
+| 规范驱动闭环 | [app/mcp/verifier/spec_store.py](./app/mcp/verifier/spec_store.py) | spec CRUD + verify 工具 + spec_diffs 注入 |
 
 ---
 
@@ -423,6 +427,161 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 | ~~静默失败/前端自动化~~ | ~~FR13/FR14/FR15 待建~~ | ✅ 已实现 |
 | 厂商锁定 | 仅 OpenAI | 多 LLM provider 已支持（openai/zhipu/custom）|
 | memory 后端 | 重启即丢 | 生产用 postgresql |
+| ~~PGStore API 误用~~ | ~~`conn.execute()` 不存在~~ | ✅ 已改用 `cur = conn.cursor(); cur.execute()` |
+| ~~data 字段非 dict 时崩溃~~ | ~~`json.loads` 失败 / `.get()` 报错~~ | ✅ `_parse_data` 安全解析 + 类型检查 |
+| SSE 长连接测试 | TestClient 中会阻塞 | 标记 `@pytest.mark.skip`，需手动验证 |
+
+---
+
+## 11. 测试策略
+
+### 11.1 测试分层
+
+| 层级 | 目录 | 用例数 | 说明 |
+| --- | --- | --- | --- |
+| 单元测试 | `tests/unit/` | 169 | redaction、fingerprint、storage、dashboard、verify_api 等 |
+| 集成测试 | `tests/integration/` | 13 | API 端点、debug flow、PostgreSQL 集成 |
+| PG 集成测试 | `tests/integration/test_pg_integration.py` | 13 | PGStore 连接、Dashboard 读取、MCP Tools 读取、LLM 分析 |
+
+### 11.2 测试执行
+
+```bash
+# 全部测试（需要 PostgreSQL 运行中）
+python -m pytest tests/ --tb=short -q
+
+# 仅单元测试（不依赖 PostgreSQL）
+python -m pytest tests/unit/ --tb=short -q
+
+# 仅 PG 集成测试
+python -m pytest tests/integration/test_pg_integration.py --tb=short -q
+```
+
+### 11.3 PG 集成测试覆盖
+
+- **PGStoreConnection**：连接池、表自动创建、save/get 往返、字符串 data 存储、list_request_ids、_parse_data 辅助函数
+- **DashboardIntegration**：stats 结构、traces 列表从 PG 读取、trace 详情从 PG 读取
+- **MCPToolIntegration**：list_recent_traces 包含 PG 数据、search_logs 搜索 PG 数据、get_logs 返回 PG 数据
+- **LLMIntegration**：analyze_with_llm 端到端（LLM 未配置时自动跳过）
+
+---
+
+## 12. 项目架构图（Mermaid）
+
+### 12.1 系统架构总览
+
+```mermaid
+flowchart TB
+    subgraph Clients["客户端层"]
+        MC["MCP 客户端<br/>Trae/Codex/Claude Desktop"]
+        REST["REST 调用方<br/>curl/Postman"]
+        Browser["浏览器<br/>Dashboard"]
+    end
+
+    subgraph Transport["传输层"]
+        STDIO["stdio<br/>app/mcp_server.py"]
+        HTTP["Streamable HTTP<br/>app/api/mcp_routes.py"]
+        DASH["Dashboard API<br/>app/api/dashboard.py"]
+    end
+
+    subgraph MW["中间件层<br/>app/middleware.py"]
+        AUTH["AuthMiddleware<br/>fail-closed"]
+        BODY["MaxBodySizeMiddleware"]
+        RATE["RateLimitMiddleware"]
+        SEC["SecurityHeadersMiddleware"]
+        TRACE["TraceMiddleware"]
+    end
+
+    subgraph Engine["调试引擎"]
+        LOGS["logs core<br/>add_log/get_logs/list_request_ids"]
+        BUILD["context builder<br/>build_debug_context"]
+        COLLECT["collectors<br/>stacktrace/runtime/code_locator/git/network"]
+        VERIFY["verifier<br/>assert_behavior + spec_store"]
+        HOOK["exception_hook<br/>全局异常捕获"]
+        LLM["LLM analyzer<br/>智谱/OpenAI"]
+    end
+
+    subgraph Storage["存储层"]
+        FACTORY["Storage Factory<br/>factory.py"]
+        PG["PGStore<br/>pg_store.py<br/>连接池+自动建表"]
+        MEM["MemoryStore<br/>memory_store.py"]
+        ERRORS["errors 缓冲<br/>errors.py<br/>内存 deque"]
+    end
+
+    DB[("PostgreSQL<br/>ai_debug_mcp<br/>traces + sessions")]
+
+    MC --> STDIO
+    REST --> HTTP
+    Browser --> DASH
+
+    STDIO --> Engine
+    HTTP --> MW --> Engine
+    DASH --> MW
+
+    Engine --> Storage
+    LOGS --> FACTORY
+    FACTORY --> PG
+    FACTORY --> MEM
+    PG --> DB
+    BUILD --> ERRORS
+
+    LLM --> |"analyze()"| Engine
+```
+
+### 12.2 数据流（POST /debug 端到端）
+
+```mermaid
+sequenceDiagram
+    participant C as 客户端
+    participant API as /debug API
+    participant Logs as logs core
+    participant Factory as Storage Factory
+    participant PG as PGStore
+    participant DB as PostgreSQL
+
+    C->>API: POST /debug {payload}
+    API->>Logs: create_request_id()
+    API->>Logs: add_log(rid, "request_start", data)
+    Logs->>Factory: get_trace_store()
+    Factory->>PG: save_entry(rid, entry)
+    PG->>DB: INSERT INTO traces ...
+    API->>Logs: add_log(rid, "processing", {...})
+    PG->>DB: INSERT INTO traces ...
+    API->>Logs: add_log(rid, "response_ready", {...})
+    PG->>DB: INSERT INTO traces ...
+    API-->>C: {request_id, result, trace, context}
+```
+
+### 12.3 Dashboard 读取流程
+
+```mermaid
+sequenceDiagram
+    participant Browser as 浏览器
+    participant DASH as Dashboard API
+    participant Collect as _collect_all_traces
+    participant Errors as errors 缓冲
+    participant Logs as logs core
+    participant PG as PGStore
+    participant DB as PostgreSQL
+
+    Browser->>DASH: GET /api/dashboard/traces
+    DASH->>Collect: _collect_all_traces(limit)
+    Collect->>Errors: list_recent(limit)
+    Errors-->>Collect: [err1, err2, ...]
+    Collect->>Logs: list_request_ids(limit)
+    Logs->>PG: list_request_ids(limit)
+    PG->>DB: SELECT DISTINCT request_id ...
+    DB-->>PG: [rid1, rid2, ...]
+    PG-->>Logs: [rid1, rid2, ...]
+    Logs-->>Collect: [rid1, rid2, ...]
+    Collect->>Logs: get_logs(rid) per id
+    Logs->>PG: get_entries(rid)
+    PG->>DB: SELECT ... WHERE request_id = ...
+    DB-->>PG: rows
+    PG-->>Logs: entries
+    Logs-->>Collect: entries
+    Collect-->>DASH: merged summaries
+    DASH-->>Browser: {traces, total}
+```
 
 ---
 

@@ -48,6 +48,14 @@ class TestVerifyWithInlineSpec:
 
 class TestVerifyPersistence:
 
+    @pytest.fixture(autouse=True)
+    def _clean_trace_persist(self):
+        """清理 PostgreSQL 中可能遗留的 trace-persist-1 数据"""
+        from app.mcp.core.logs import delete_logs
+        delete_logs("trace-persist-1")
+        yield
+        delete_logs("trace-persist-1")
+
     def test_verify_persists_with_trace_id(self):
         """有 trace_id 时，verify 结果持久化到 logs（step=verify）"""
         from app.mcp.core.logs import get_logs

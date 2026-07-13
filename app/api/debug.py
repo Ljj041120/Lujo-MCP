@@ -8,6 +8,7 @@ import json
 
 from app.mcp.core.logs import create_request_id, add_log, get_logs
 from app.mcp.core.session import session_manager
+import time
 from app.mcp.builders.context import build_context
 from app.mcp.collectors.runtime import collect_runtime_snapshot
 from app.mcp.collectors.stacktrace import capture_exception, format_trace_for_ai
@@ -173,7 +174,7 @@ def list_sessions():
                 "session_id": s["session_id"],
                 "created_at": s["created_at"],
                 "last_active": s["last_active"],
-                "idle_seconds": round(s.get("last_active", 0) - s.get("created_at", 0), 1),
+                "idle_seconds": round(time.time() - s.get("last_active", time.time()), 1),
                 "metadata": s.get("metadata", {}),
             }
             for s in sessions
@@ -216,3 +217,21 @@ def debug_verify_ui(body: dict):
     except Exception as e:
         logger.exception("verify_ui 执行失败")
         raise HTTPException(status_code=500, detail=f"verify_ui 失败: {e}")
+
+
+@router.get("/health")
+def debug_health():
+    """健康检查接口，供 XHR 测试使用"""
+    return {"status": "ok", "timestamp": time.time()}
+
+
+@router.post("/echo")
+def debug_echo(body: dict):
+    """回显接口，返回请求体"""
+    return {"status": "ok", "received": body}
+
+
+@router.get("/token")
+def debug_token():
+    """返回带 token 的响应，用于测试响应脱敏"""
+    return {"token": "abc123", "user_id": 123, "username": "admin"}

@@ -41,16 +41,17 @@ from app.mcp.tools.git_api import tool_get_blame_for_frame, tool_get_recent_diff
 from app.mcp.tools.silent_failure_api import tool_ingest_silent_failure
 from app.mcp.tools.ingest_api import tool_ingest_error
 from app.mcp.tools.spec_api import tool_get_related_specs
+from app.mcp.tools.auto_test_api import auto_test_handler
 from app.mcp.hooks.exception_hook import install_global_hook
 
-logging.basicConfig(level=logging.INFO, stream=None)  # stdio模式下不要往stdout打日志，避免污染协议流
+logging.basicConfig(level=logging.INFO, stream=None, force=True)  # stdio模式下不要往stdout打日志，避免污染协议流
 logger = logging.getLogger("ai-debug-mcp")
 
 server = Server("ai-debug-mcp")
 
 
 @server.list_tools()
-async def list_tools() -> list[Tool]:
+async def list_tools() -> list[Tool]:#async声明函数是可以等待的
     return [
         Tool(
             name="get_stacktrace",
@@ -215,6 +216,25 @@ async def list_tools() -> list[Tool]:
                 "required": ["file"],
             },
         ),
+        Tool(
+            name="auto_test",
+            description=(
+                "自动遍历页面所有可交互元素（按钮/链接/输入框），"
+                "依次执行点击并监听控制台错误和网络 4xx/5xx。"
+                "不需要手动指定选择器，适合快速验收 AI 生成的前端页面。"
+                "需要 Playwright（pip install playwright && playwright install chromium）。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "要测试的页面 URL"},
+                    "max_actions": {"type": "integer", "default": 20},
+                    "capture_console": {"type": "boolean", "default": True},
+                    "capture_network": {"type": "boolean", "default": True},
+                },
+                "required": ["url"],
+            },
+        ),
     ]
 
 
@@ -266,6 +286,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 source=arguments.get("source", "ingest"),
                 extra=arguments.get("extra"),
             )
+        elif name == "auto_test":
+            result = auto_test_handler(arguments)
         elif name == "get_related_specs":
             result = tool_get_related_specs(arguments["file"])
         else:
