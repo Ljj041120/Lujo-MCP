@@ -27,3 +27,8 @@ def get_logs(request_id: str) -> list[dict]:
 def delete_logs(request_id: str) -> None:
     store = get_trace_store()
     store.delete(request_id)
+
+
+def list_request_ids(limit: int = 50) -> list[str]:
+    store = get_trace_store()
+    return store.list_request_ids(limit)

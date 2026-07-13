@@ -11,26 +11,157 @@ logger = logging.getLogger("ai-debug-mcp.dashboard")
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
+def _safe_int(value, default=0):
+    """安全转换为 int"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _extract_error_summary(err: dict) -> dict:
+    """从 errors 缓冲的记录中提取摘要"""
+    trace_id = err.get("error_id", "")
+    meta = {}
+    try:
+        for entry in logs.get_logs(trace_id):
+            if entry.get("step") == "trace_meta":
+                data = entry.get("data")
+                if isinstance(data, dict):
+                    meta = data
+                    break
+    except Exception:
+        pass
+
+    trace_kind = meta.get("trace_kind", "exception")
+    verify_count = 0
+    has_silent_failure = False
+    try:
+        for entry in logs.get_logs(trace_id):
+            if entry.get("step") == "verify":
+                data = entry.get("data")
+                if isinstance(data, dict):
+                    verify_count += 1
+                    if data.get("silent_failure"):
+                        has_silent_failure = True
+    except Exception:
+        pass
+
+    return {
+        "trace_id": trace_id,
+        "timestamp": err.get("timestamp", 0),
+        "type": err.get("type", "ERROR"),
+        "message": (err.get("message") or "")[:200],
+        "trace_kind": trace_kind,
+        "occurrence_count": err.get("occurrence_count", 1),
+        "has_silent_failure": has_silent_failure,
+        "verify_count": verify_count,
+    }
+
+
+def _extract_trace_summary(request_id: str) -> dict | None:
+    """从存储中提取 trace 摘要信息"""
+    entries = logs.get_logs(request_id)
+    if not entries:
+        return None
+
+    summary = {
+        "trace_id": request_id,
+        "timestamp": 0,
+        "type": "debug",
+        "message": "",
+        "trace_kind": "debug",
+        "occurrence_count": 1,
+        "has_silent_failure": False,
+        "verify_count": 0,
+    }
+
+    spec_diffs = []
+    for entry in entries:
+        ts = entry.get("timestamp", 0)
+        if ts > summary["timestamp"]:
+            summary["timestamp"] = ts
+
+        step = entry.get("step", "")
+        data = entry.get("data")
+
+        if isinstance(data, str):
+            if step == "error":
+                summary["type"] = "ERROR"
+                summary["message"] = data[:200]
+                summary["trace_kind"] = "exception"
+            elif step == "request_start":
+                summary["message"] = data[:200]
+            elif step == "response_ready":
+                summary["type"] = "RESPONSE"
+            continue
+
+        if not isinstance(data, dict):
+            continue
+
+        if step == "request_start":
+            summary["type"] = data.get("method", "REQUEST")
+            summary["message"] = data.get("url", "")[:200]
+        elif step == "response_ready":
+            status = _safe_int(data.get("status", 0))
+            summary["type"] = f"RESPONSE {status}"
+            if status >= 400:
+                summary["trace_kind"] = "exception"
+        elif step == "error":
+            summary["type"] = data.get("error_type", "ERROR")
+            summary["message"] = (data.get("message", "") or "")[:200]
+            summary["trace_kind"] = "exception"
+            summary["has_silent_failure"] = data.get("silent", False)
+        elif step == "verify":
+            spec_diffs.append(data)
+            if data.get("silent_failure"):
+                summary["has_silent_failure"] = True
+
+    summary["verify_count"] = len(spec_diffs)
+    return summary
+
+
+def _collect_all_traces(limit: int = 100) -> list[dict]:
+    """合并 errors 缓冲和 TraceStorage 中的 trace 摘要"""
+    result = []
+    seen_ids = set()
+
+    for err in errors.list_recent(limit=limit):
+        summary = _extract_error_summary(err)
+        if summary and summary["trace_id"] not in seen_ids:
+            result.append(summary)
+            seen_ids.add(summary["trace_id"])
+
+    for rid in logs.list_request_ids(limit=limit):
+        if rid not in seen_ids:
+            summary = _extract_trace_summary(rid)
+            if summary:
+                result.append(summary)
+                seen_ids.add(rid)
+
+    result.sort(key=lambda t: t.get("timestamp", 0), reverse=True)
+    return result[:limit]
+
+
 @router.get("/stats")
 def get_stats():
     """控制台概览统计"""
-    recent = errors.list_recent(limit=100)
+    all_traces = _collect_all_traces(limit=100)
 
-    total = len(recent)
-    silent_count = sum(
-        1 for e in recent if e.get("type") == "SilentFailure"
-        or trace_repo.get_trace(e["error_id"]) is not None
-        and trace_repo.get_trace(e["error_id"]).get("trace_kind") == "silent_failure"
+    total = len(all_traces)
+    silent_count = sum(1 for t in all_traces if t.get("has_silent_failure"))
+    exception_count = sum(
+        1 for t in all_traces
+        if t.get("trace_kind") == "exception" and not t.get("has_silent_failure")
     )
 
-    # 检查 spec 数量
     from app.mcp.verifier import spec_store
     spec_count = len(spec_store.list_specs())
 
     return {
         "total_traces": total,
         "silent_failures": silent_count,
-        "exceptions": total - silent_count,
+        "exceptions": exception_count,
         "spec_count": spec_count,
     }
 
@@ -38,39 +169,7 @@ def get_stats():
 @router.get("/traces")
 def list_traces(limit: int = 20):
     """列出最近 traces（含 verify 结果摘要）"""
-    items = errors.list_recent(limit=limit)
-    result = []
-
-    for e in items:
-        tid = e["error_id"]
-        trace = trace_repo.get_trace(tid) or {}
-        trace_kind = trace.get("trace_kind", "exception")
-
-        # 取 verify 结果
-        spec_diffs = []
-        try:
-            spec_diffs = [
-                entry["data"] for entry in logs.get_logs(tid)
-                if entry.get("step") == "verify"
-            ]
-        except Exception:
-            pass
-
-        has_silent = trace_kind == "silent_failure" or any(
-            d.get("silent_failure") for d in spec_diffs
-        )
-
-        result.append({
-            "trace_id": tid,
-            "timestamp": e.get("last_seen", e.get("timestamp", 0)),
-            "type": e.get("type", ""),
-            "message": (e.get("message") or "")[:200],
-            "trace_kind": trace_kind,
-            "occurrence_count": e.get("occurrence_count", 1),
-            "has_silent_failure": has_silent,
-            "verify_count": len(spec_diffs),
-        })
-
+    result = _collect_all_traces(limit=limit)
     return {"traces": result, "total": len(result)}
 
 

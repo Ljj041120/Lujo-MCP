@@ -24,6 +24,10 @@ class TraceStorage(ABC):
         """清理过期条目，返回清理数量"""
         ...
 
+    def list_request_ids(self, limit: int = 50) -> list[str]:
+        """列出最近的 request_id（可选，默认返回空列表）"""
+        return []
+
 
 class SessionStorage(ABC):
     """会话存储的抽象接口"""

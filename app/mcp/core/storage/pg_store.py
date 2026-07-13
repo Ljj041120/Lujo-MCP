@@ -15,6 +15,21 @@ from app.mcp.core.storage.base import TraceStorage, SessionStorage
 
 logger = logging.getLogger("ai-debug-mcp.storage.pg")
 
+
+def _parse_data(value):
+    """安全解析 data 字段：处理 None / dict / list / JSON 字符串 / 普通字符串"""
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return value
+    return value
+
+
 # ── 全局连接池（线程安全初始化） ──
 _pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
 _pool_lock = threading.Lock()
@@ -93,8 +108,9 @@ def _ensure_init():
         pool = _get_pool()
         conn = pool.getconn()
         try:
-            conn.execute(DDL_TRACES)
-            conn.execute(DDL_SESSIONS)
+            cur = conn.cursor()
+            cur.execute(DDL_TRACES)
+            cur.execute(DDL_SESSIONS)
             conn.commit()
             _initialized = True
             logger.info("PostgreSQL 表初始化完成")
@@ -114,7 +130,8 @@ def _execute_with_retry(
     last_error = None
     for attempt in range(max_retries + 1):
         try:
-            conn.execute(sql, params)
+            cur = conn.cursor()
+            cur.execute(sql, params)
             if commit:
                 conn.commit()
             return
@@ -147,6 +164,14 @@ class PGTraceStore(TraceStorage):
     def save_entry(self, request_id: str, entry: dict) -> None:
         conn = self._conn()
         try:
+            data = entry.get("data")
+            if data is None:
+                data_str = None
+            elif isinstance(data, (str, int, float, bool, list, dict)):
+                data_str = json.dumps(data, ensure_ascii=False, default=str)
+            else:
+                data_str = json.dumps(str(data), ensure_ascii=False)
+
             _execute_with_retry(
                 conn,
                 "INSERT INTO traces (request_id, timestamp, step, data) VALUES (%s, %s, %s, %s)",
@@ -154,7 +179,7 @@ class PGTraceStore(TraceStorage):
                     request_id,
                     entry.get("timestamp", time.time()),
                     entry.get("step", ""),
-                    json.dumps(entry.get("data")) if entry.get("data") is not None else None,
+                    data_str,
                 ),
             )
         finally:
@@ -173,7 +198,7 @@ class PGTraceStore(TraceStorage):
                 {
                     "timestamp": r[0],
                     "step": r[1],
-                    "data": json.loads(r[2]) if isinstance(r[2], str) else r[2],
+                    "data": _parse_data(r[2]),
                 }
                 for r in rows
             ]
@@ -209,10 +234,25 @@ class PGTraceStore(TraceStorage):
         finally:
             self._put(conn)
 
+    def list_request_ids(self, limit: int = 50) -> list[str]:
+        conn = self._conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT request_id FROM ("
+                "  SELECT request_id, MAX(timestamp) as max_ts FROM traces GROUP BY request_id"
+                ") t ORDER BY max_ts DESC LIMIT %s",
+                (limit,),
+            )
+            rows = cur.fetchall()
+            return [r[0] for r in rows]
+        finally:
+            self._put(conn)
 
-# ════════════════════════════════════════════
+
+# ════════════════════════════════════════════════
 #  Session 存储
-# ════════════════════════════════════════════
+# ════════════════════════════════════════════════
 class PGSessionStore(SessionStorage):
     def __init__(self):
         _ensure_init()

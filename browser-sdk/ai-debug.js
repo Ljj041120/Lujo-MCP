@@ -22,10 +22,13 @@
     endpoint: "",
     apiKey: "",
     captureErrors: true,
-    captureNetwork: false,   // 收网络请求体较大，默认关闭
+    captureNetwork: true,
     captureUI: true,
+    captureConsole: true,
     redactFields: ["password", "token", "secret", "authorization"],
-    sampleRate: 1.0,         // 采样率 0-1
+    sampleRate: 1.0,
+    networkSampleRate: 1.0,
+    networkThrottleMs: 0,
   };
 
   var _inited = false;
@@ -68,6 +71,14 @@
     }
   }
 
+  function _isSelfRequest(url) {
+    if (!cfg.endpoint) return false;
+    url = String(url || "");
+    if (!url) return false;
+    var endpoint = cfg.endpoint.replace(/\/+$/, "");
+    return url.indexOf(endpoint) === 0;
+  }
+
   // ── 全局异常捕获 ──
   function _installErrorHook() {
     // window.onerror → 同步异常
@@ -79,7 +90,7 @@
       } else {
         frames = [{ file: file || "", line: line || 0, function: "" }];
       }
-      _send("/api/ingest/error", {
+      _send("/ingest/error", {
         exc_type: error ? error.name : "Error",
         message: String(msg),
         frames: frames,
@@ -96,7 +107,7 @@
     // unhandledrejection → Promise 未捕获
     global.addEventListener("unhandledrejection", function (e) {
       var reason = e.reason;
-      _send("/api/ingest/error", {
+      _send("/ingest/error", {
         exc_type: reason ? reason.name || "UnhandledRejection" : "UnhandledRejection",
         message: reason ? reason.message || String(reason) : "Promise rejected",
         frames: reason && reason.stack ? _parseStack(reason.stack) : [],
@@ -126,6 +137,101 @@
   }
 
   // ── 网络请求拦截 ──
+  var _networkThrottle = {};
+  var _onNetworkCapture = null;
+
+  function _shouldSampleNetwork() {
+    return Math.random() < cfg.networkSampleRate;
+  }
+
+  function _shouldThrottle(method, url) {
+    if (cfg.networkThrottleMs <= 0) return false;
+    var key = method.toUpperCase() + ":" + url;
+    var now = Date.now();
+    if (_networkThrottle[key] && now - _networkThrottle[key] < cfg.networkThrottleMs) {
+      return true;
+    }
+    _networkThrottle[key] = now;
+    _cleanupNetworkThrottle();
+    return false;
+  }
+
+  function _cleanupNetworkThrottle() {
+    var maxSize = 1000;
+    var keys = Object.keys(_networkThrottle);
+    if (keys.length > maxSize) {
+      var sortedKeys = keys.sort(function(a, b) {
+        return _networkThrottle[a] - _networkThrottle[b];
+      });
+      var removeCount = keys.length - maxSize;
+      for (var i = 0; i < removeCount; i++) {
+        delete _networkThrottle[sortedKeys[i]];
+      }
+    }
+  }
+
+  function _notifyNetworkCapture(record) {
+    if (_onNetworkCapture && typeof _onNetworkCapture === 'function') {
+      try {
+        _onNetworkCapture(record);
+      } catch (e) {
+      }
+    }
+  }
+
+  function _serializeRequestBody(body) {
+    if (body === null || body === undefined) {
+      return null;
+    }
+    if (typeof body === 'string') {
+      return body;
+    }
+    if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+      try {
+        return body.toString();
+      } catch (e) {
+        return '[URLSearchParams]';
+      }
+    }
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+      try {
+        var params = [];
+        body.forEach(function(value, key) {
+          params.push(key + '=' + value);
+        });
+        return params.join('&');
+      } catch (e) {
+        return '[FormData]';
+      }
+    }
+    if (typeof Blob !== 'undefined' && body instanceof Blob) {
+      return '[Blob: ' + body.type + ', ' + body.size + ' bytes]';
+    }
+    if (typeof ArrayBuffer !== 'undefined' && body instanceof ArrayBuffer) {
+      return '[ArrayBuffer: ' + body.byteLength + ' bytes]';
+    }
+    if (typeof body === 'object') {
+      try {
+        return JSON.stringify(body);
+      } catch (e) {
+        return '[object]';
+      }
+    }
+    return String(body);
+  }
+
+  function _reportNetworkRecord(record) {
+    try {
+      _notifyNetworkCapture(record);
+      _send("/ingest/network", {
+        record: record,
+        source: "browser-sdk",
+        extra: { session_id: _sessionId },
+      });
+    } catch (e) {
+    }
+  }
+
   function _installNetworkHook() {
     if (!cfg.captureNetwork) return;
 
@@ -133,44 +239,174 @@
     if (_origFetch) {
       global.fetch = function () {
         var args = arguments;
-        var start = Date.now();
-        var url = typeof args[0] === "string" ? args[0] : (args[0] || {}).url || "";
+        var rawUrl = args[0];
+        var url = "";
+        if (typeof rawUrl === "string") {
+          url = rawUrl;
+        } else if (rawUrl && typeof rawUrl === "object") {
+          url = rawUrl.url || rawUrl.href || String(rawUrl);
+        }
+
+        if (_isSelfRequest(url)) {
+          return _origFetch.apply(this, args);
+        }
+
         var method = (args[1] && args[1].method) || "GET";
-        var reqBody = (args[1] && args[1].body) || null;
+
+        if (!_shouldSampleNetwork()) {
+          return _origFetch.apply(this, args);
+        }
+
+        if (_shouldThrottle(method, url)) {
+          return _origFetch.apply(this, args);
+        }
+
+        var start = Date.now();
+        var reqBody = _serializeRequestBody((args[1] && args[1].body) || null);
 
         return _origFetch.apply(this, args).then(function (res) {
           var clone = res.clone();
           clone.text().then(function (text) {
-            _send("/api/ingest/network", {
-              record: {
-                url: url,
-                method: method.toUpperCase(),
-                status_code: res.status,
-                duration_ms: Date.now() - start,
-                request_body: reqBody,
-                response_body: text.slice(0, 2000),
-              },
-              source: "browser-sdk",
-              extra: { session_id: _sessionId },
-            });
+            var record = {
+              url: url,
+              method: method.toUpperCase(),
+              status_code: res.status,
+              duration_ms: Date.now() - start,
+              request_body: reqBody,
+              response_body: text.slice(0, 2000),
+            };
+            _reportNetworkRecord(record);
           }).catch(function () {});
           return res;
         }).catch(function (err) {
-          _send("/api/ingest/network", {
-            record: {
-              url: url,
-              method: method.toUpperCase(),
-              status_code: 0,
-              error: err.message,
-              duration_ms: Date.now() - start,
-            },
-            source: "browser-sdk",
-            extra: { session_id: _sessionId },
-          });
+          var record = {
+            url: url,
+            method: method.toUpperCase(),
+            status_code: 0,
+            error: err.message,
+            duration_ms: Date.now() - start,
+            request_body: reqBody,
+          };
+          _reportNetworkRecord(record);
           throw err;
         });
       };
     }
+  }
+
+  // ── XMLHttpRequest 拦截 ──
+  function _installXhrHook() {
+    if (!cfg.captureNetwork) return;
+
+    var _origXhrOpen = XMLHttpRequest.prototype.open;
+    var _origXhrSend = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function () {
+      var args = arguments;
+      this._aiDebugMethod = (args[0] || "GET").toUpperCase();
+      this._aiDebugUrl = args[1] || "";
+      this._aiDebugSkip = _isSelfRequest(this._aiDebugUrl);
+      return _origXhrOpen.apply(this, args);
+    };
+
+    XMLHttpRequest.prototype.send = function () {
+      var args = arguments;
+      var xhr = this;
+
+      if (xhr._aiDebugSkip) {
+        return _origXhrSend.apply(xhr, args);
+      }
+
+      var method = xhr._aiDebugMethod || "GET";
+      var url = xhr._aiDebugUrl || "";
+
+      if (!_shouldSampleNetwork()) {
+        return _origXhrSend.apply(xhr, args);
+      }
+
+      if (_shouldThrottle(method, url)) {
+        return _origXhrSend.apply(xhr, args);
+      }
+
+      var start = Date.now();
+      var reqBody = _serializeRequestBody(args[0] || null);
+
+      function _onLoad() {
+        try {
+          var responseText = "";
+          try {
+            responseText = xhr.responseText ? xhr.responseText.slice(0, 2000) : "";
+          } catch (e) {
+            responseText = "";
+          }
+          var record = {
+            url: url,
+            method: method.toUpperCase(),
+            status_code: xhr.status,
+            duration_ms: Date.now() - start,
+            request_body: reqBody,
+            response_body: responseText,
+          };
+          _reportNetworkRecord(record);
+        } catch (e) {
+        }
+      }
+
+      function _onError() {
+        try {
+          var record = {
+            url: url,
+            method: method.toUpperCase(),
+            status_code: 0,
+            error: "XHR error",
+            duration_ms: Date.now() - start,
+            request_body: reqBody,
+          };
+          _reportNetworkRecord(record);
+        } catch (e) {
+        }
+      }
+
+      function _onAbort() {
+        try {
+          var record = {
+            url: url,
+            method: method.toUpperCase(),
+            status_code: 0,
+            error: "XHR aborted",
+            duration_ms: Date.now() - start,
+            request_body: reqBody,
+          };
+          _reportNetworkRecord(record);
+        } catch (e) {
+        }
+      }
+
+      function _onTimeout() {
+        try {
+          var record = {
+            url: url,
+            method: method.toUpperCase(),
+            status_code: 0,
+            error: "XHR timeout",
+            duration_ms: Date.now() - start,
+            request_body: reqBody,
+          };
+          _reportNetworkRecord(record);
+        } catch (e) {
+        }
+      }
+
+      try {
+        xhr.addEventListener("load", _onLoad);
+        xhr.addEventListener("error", _onError);
+        xhr.addEventListener("abort", _onAbort);
+        xhr.addEventListener("timeout", _onTimeout);
+      } catch (e) {
+      }
+
+      return _origXhrSend.apply(xhr, args);
+    };
   }
 
   // ── UI 事件捕获 ──
@@ -190,7 +426,7 @@
         if (_debounce[key] && now - _debounce[key] < 1000) return;
         _debounce[key] = now;
 
-        _send("/api/ingest/ui-event", {
+        _send("/ingest/ui-event", {
           event: {
             event_type: e.type,
             target_selector: _getSelector(target),
@@ -214,10 +450,59 @@
     return el.tagName ? el.tagName.toLowerCase() : "";
   }
 
+  // ── 控制台日志捕获 ──
+  var _consoleHookInstalled = false;
+
+  function _installConsoleHook() {
+    if (!cfg.captureConsole || _consoleHookInstalled) return;
+    _consoleHookInstalled = true;
+
+    var _origError = global.console.error;
+    if (_origError) {
+      global.console.error = function () {
+        _sendConsole("error", Array.prototype.slice.call(arguments));
+        _origError.apply(global.console, arguments);
+      };
+    }
+
+    var _origWarn = global.console.warn;
+    if (_origWarn) {
+      global.console.warn = function () {
+        _sendConsole("warn", Array.prototype.slice.call(arguments));
+        _origWarn.apply(global.console, arguments);
+      };
+    }
+  }
+
+  function _sendConsole(level, args) {
+    var messages = [];
+    for (var i = 0; i < args.length; i++) {
+      var arg = args[i];
+      try {
+        if (typeof arg === "object") {
+          messages.push(JSON.stringify(_redact(arg)));
+        } else {
+          messages.push(String(arg));
+        }
+      } catch (e) {
+        messages.push("[object]");
+      }
+    }
+    _send("/ingest/console", {
+      level: level,
+      message: messages.join(" "),
+      source: "browser-sdk",
+      extra: {
+        session_id: _sessionId,
+        url: global.location ? global.location.href : "",
+      },
+    });
+  }
+
   // ── 公开 API ──
   /**
    * 初始化 SDK
-   * @param {object} opts - { endpoint, apiKey, captureErrors, captureNetwork, captureUI, sampleRate }
+   * @param {object} opts - { endpoint, apiKey, captureErrors, captureNetwork, captureUI, sampleRate, networkSampleRate, networkThrottleMs }
    */
   function init(opts) {
     if (_inited) return;
@@ -235,7 +520,9 @@
     _inited = true;
     _installErrorHook();
     _installNetworkHook();
+    _installXhrHook();
     _installUIHook();
+    _installConsoleHook();
     console.log("[ai-debug] SDK initialized, session=" + _sessionId);
   }
 
@@ -244,8 +531,11 @@
    * @param {object} payload - { description, element?, expected?, observed?, route? }
    */
   function reportSilentFailure(payload) {
-    _send("/api/ingest/silent-failure", {
-      payload: payload || {},
+    payload = payload || {};
+    _send("/ingest/silent-failure", {
+      message: payload.description,
+      expectation: payload.expected,
+      observed: payload.observed,
       source: "browser-sdk",
       extra: {
         session_id: _sessionId,
@@ -260,7 +550,7 @@
    * @param {object} extra
    */
   function reportError(error, extra) {
-    _send("/api/ingest/error", {
+    _send("/ingest/error", {
       exc_type: error ? error.name || "Error" : "Error",
       message: error ? error.message || String(error) : "",
       frames: error && error.stack ? _parseStack(error.stack) : [],
@@ -277,7 +567,7 @@
    * @param {object} event - { event_type, target_selector, route_path }
    */
   function reportUIEvent(event) {
-    _send("/api/ingest/ui-event", {
+    _send("/ingest/ui-event", {
       event: {
         event_type: event.event_type || "click",
         target_selector: event.target_selector || "",
@@ -305,6 +595,9 @@
     reportUIEvent: reportUIEvent,
     getSessionId: getSessionId,
     _cfg: cfg,
+    onNetworkCapture: function (callback) {
+      _onNetworkCapture = callback;
+    },
   };
 
   // 支持 CommonJS / ES module / 全局变量

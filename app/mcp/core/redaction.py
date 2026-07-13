@@ -35,6 +35,18 @@ _DEFAULT_RULES: list[tuple["re.Pattern[str]", str]] = [
         re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer\s+))(?:'[^']*'|\"[^\"]*\"|\S+)"),
         r"\1***",
     ),
+    # JSON 格式: {"password":"xxx"}
+    (
+        re.compile(r"(?i)\"(password|pwd|passwd)\"\s*:\s*(?:'[^']*'|\"[^\"]*\"|\S+)"),
+        r'"\1":"***"',
+    ),
+    # JSON 格式: {"api_key":"xxx"}, {"token":"xxx"}, {"secret":"xxx"}, {"authorization":"xxx"}
+    (
+        re.compile(
+            r"(?i)\"(api[_-]?key|apikey|secret|token|access[_-]?token|auth[_-]?token|private[_-]?key|authorization)\"\s*:\s*(?:'[^']*'|\"[^\"]*\"|\S+)"
+        ),
+        r'"\1":"***"',
+    ),
     # 中国大陆 11 位手机号
     (re.compile(r"\b1[3-9]\d{9}\b"), "***PHONE***"),
 ]

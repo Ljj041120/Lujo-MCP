@@ -1,82 +1,132 @@
-# 开发计划（每日 Review 用）
+# 开发计划（当前 Sprint）
 
-> 最近更新：2026-07-08
-> 当前进度：参考项目迁移 M1–M10 ✅。V1-V5 verify ✅。多 LLM provider ✅。Web 控制台 ✅。
-> 浏览器 SDK TS + Playwright UI 遍历 + verify_ui 工具 ✅。全量 162 passed / 6 skipped。
-
----
-
-## 一、下一阶段目标：`verify` 自动断言（FR13 自动检测 / FR15 闭环）
-
-**为什么先做这个**：现在规范驱动只做到"把规范塞给 AI 看"（被动），还差"系统自动比对期望 vs 实际，偏离即告警"（主动）。这是 P5/P6 痛点（"点了没反应""AI 说没问题但实则有问题"）的最后一公里。做完，静默失败才能从"靠前端 SDK 人工标记期望"升级为"自动判定"。
-
-### 1. 目标
-- 输入：一条请求/交互的实际结果 + 一份"期望规范"。
-- 输出：`{matched: bool, diffs: [...], silent_failure: bool}`，无异常且 `matched=false` 时判为静默失败。
-
-### 2. 数据模型（新增）
-```python
-Spec  = { id, kind: "api"|"ui"|"rule", target, expect: {status?, body_rules?, state_change?} }
-Diff  = { field, expected, actual }
-VerifyResult = { matched, diffs: [Diff], silent_failure, trace_id? }
-```
-
-### 3. 断言引擎设计
-- 新建 `app/mcp/verifier/assert_engine.py`：
-  - `assert_behavior(actual: dict, spec: Spec) -> {matched, diffs}`
-  - API 类：比对 status_code、body 字段（JSONPath/键值规则）。
-  - UI 类：比对期望状态变化（route_change / dom_change / network_request）是否发生。
-  - 静默判定：`matched==false` 且 无异常、无 4xx/5xx → `silent_failure=true`。
-- 复用现有 `trace_repo` 存 verify 结果（step=`verify`），复用 `build_debug_context` 注入 `spec_diffs`。
-
-### 4. 工具 / 接口
-- MCP 工具 `verify`：`{request_id 或 interaction, spec?}` → `VerifyResult`。
-- REST：`POST /api/debug/verify`。
-- 规范来源：不传 spec 时，尝试用 `spec.get_related_specs` 推断（可选）。
-
-### 5. 模块拆分（每步少量文件，做完即停）
-| 步骤 | 文件 | 说明 |
-| --- | --- | --- |
-| V1 | `app/mcp/verifier/assert_engine.py` + 单测 | 断言引擎核心，纯函数 |
-| V2 | `app/mcp/verifier/spec_store.py` + 单测 | 规范 CRUD（复用 TraceStorage 抽象，step=`spec`） |
-| V3 | `app/mcp/tools/verify_api.py` + 双传输注册 | `verify` 工具 |
-| V4 | `app/api/debug.py` 增 `/api/debug/verify` | REST 端点 |
-| V5 | `build_debug_context` 注入 `spec_diffs` + 文档 | 闭环 |
-
-### 6. 验收
-- 构造"返回 200 但 body 字段缺失"请求 → `verify` 输出 `silent_failure=true`。
-- 定义规范后，`verify` 自动校验，偏离即告警（即使无传统错误）。
+> 定位：当前开发执行计划，记录当前 Sprint 目标、近期任务、Bug 列表和开发顺序。
+> 长期路线请见 [CODE_REVIEW.md](./CODE_REVIEW.md)。
+> 最近更新：2026-07-13
+> 当前进度：Phase 1.x 工程化增强阶段，V1-V5 verify ✅，下一阶段 P1 Browser SDK 自动采集
 
 ---
 
-## 二、后续 Backlog（按价值排序，V 之后做）
+## 一、当前 Sprint 目标
 
-| 优先级 | 项 | 说明 | 改动量 |
-| --- | --- | --- | --- |
-| 中 | 多 LLM provider | 内置 analyzer 抽 `LLMProvider`，支持智谱 GLM（OpenAI 兼容 base_url）/ 本地 | ~1 文件 | ✅ done（2026-07-08，5 tests）|
-| 低 | Web 控制台 | 可视化 trace / 静默失败 / verify 结果 | 较大，独立阶段 | ✅ done（2026-07-08，7 tests）|
-| 低 | 浏览器 SDK TS | 前端开箱即用（后端 ingest 已就绪） | 复制+适配 | ✅ done（2026-07-08，browser-sdk/ai-debug.js）|
-| 低 | Playwright 自动遍历 | FR14，前端 UI 自动点击遍历 | 较大 | ✅ done（2026-07-08，7 tests + verify_ui 工具 + REST 端点）|
+**目标**：完成 P1 Browser SDK 自动采集（V1-V6）
+
+**为什么先做这个**：当前浏览器 SDK 只支持基础的手动上报，需要让浏览器端错误、网络请求、UI 事件自动进入 Trace 系统，形成完整的端到端调试链路。
+
+**交付物**：
+- 控制台错误自动上报
+- 网络请求默认捕获（带采样率）
+- 网络错误自动标记静默失败
+- SDK 初始化追踪
+- UI 静默失败自动检测
 
 ---
 
-## 三、每日 Review 清单
+## 二、近期任务（P1 Browser SDK 自动采集）
 
-- [ ] 跑测试：`(.venv) python -m pytest tests/unit/ -q`（应 93 passed/5 skipped）
-- [ ] 看本文件"一、下一阶段目标"当前做到哪一步（V1–V5 勾选）
+| 步骤 | 文件 | 说明 | 状态 |
+|------|------|------|------|
+| V1 | `browser-sdk/ai-debug.js` | 控制台错误捕获（console.error/warn） | ✅ 已完成 |
+| V2 | `browser-sdk/ai-debug.js` | 默认开启网络捕获 + 性能优化（采样率+节流） | 🔲 待开发 |
+| V3 | `browser-sdk/ai-debug.js` | 网络错误自动标记静默失败（4xx/5xx） | 🔲 待开发 |
+| V4 | `browser-sdk/ai-debug.js` | SDK 初始化追踪 + 请求关联（trace_id） | 🔲 待开发 |
+| V5 | `app/api/ingest.py` | 增强 ingest 端点，支持 SDK 数据关联 | 🔲 待开发 |
+| V6 | `browser-sdk/ai-debug.js` | 自动检测 UI 静默失败（点击无响应） | 🔲 待开发 |
+
+### V1 验收标准（已完成）
+- `console.error` 调用自动上报到 `/api/ingest/console`
+- `console.warn` 调用自动上报到 `/api/ingest/console`
+
+**V1 完成内容**：
+- console.error 自动捕获
+- console.warn 自动捕获
+- MCP console ingest tool
+- trace_id/request_id 关联
+- 脱敏保护（前端 `_redact()` + 后端 `redact()`）
+- 测试覆盖（4 个新增测试用例）
+
+### V2 验收标准
+- 网络请求默认捕获
+- 采样率生效（networkSampleRate）
+- 节流生效（networkThrottleMs）
+
+### V3 验收标准
+- 网络 4xx/5xx 自动标记 `silent_failure=true`
+- 静默失败数据写入 spec_diffs
+
+### V4 验收标准
+- SDK 初始化创建 trace
+- 后续上报关联同一 session_id
+
+### V5 验收标准
+- `/api/ingest/console` 端点正常接收
+- `/api/ingest/init` 端点正常接收
+- 数据关联正确
+
+### V6 验收标准
+- 点击按钮无响应（2秒内无网络请求）自动报告静默失败
+
+---
+
+## 三、后续 Sprint 预告
+
+> 以下为后续 Sprint 的优先级排序，详细任务将在进入对应 Sprint 时拆分。
+
+| 优先级 | 任务 | 目标 |
+|--------|------|------|
+| **P2** | SSE 实时 Dashboard | 实现 Trace 实时推送 |
+| **P3** | Docker Compose 完善 | 一键启动完整开发环境 |
+| **P4** | LLM Root Cause Analysis 增强 | 增强 LLM 分析能力 |
+| **P5** | Repository 层优化和 spec_store 持久化 | 延后执行 |
+
+---
+
+## 四、Bug 列表
+
+> 当前无已知 Bug。
+
+| Bug | 描述 | 状态 | 处置 |
+|-----|------|------|------|
+| - | - | - | - |
+
+---
+
+## 五、开发顺序
+
+1. **先做 V1-V2**：基础能力（控制台错误 + 网络捕获）
+2. **再做 V3-V4**：增强能力（静默失败标记 + 请求关联）
+3. **然后 V5**：服务端配合（ingest 端点增强）
+4. **最后 V6**：高级能力（UI 静默失败自动检测）
+
+每步完成后：
+- 运行测试（`python -m pytest tests/ -q`）
+- 更新 [AI_HANDOFF.md](./AI_HANDOFF.md) 任务交接
+- 提交代码（遵循 [AI_RULES.md](./AI_RULES.md) Git 规范）
+
+---
+
+## 六、每日 Review 清单
+
+- [ ] 跑测试：`python -m pytest tests/unit/ -q`
+- [ ] 看本文件"二、近期任务"当前做到哪一步（V1–V6 勾选）
 - [ ] 决定今天推进哪一步，做完在此勾选 + 提交
 
 ### 进度勾选
-- [x] V1 断言引擎（2026-07-08 done，16 tests passed）
-- [x] V2 spec_store（2026-07-08 done，14 tests passed）
-- [x] V3 verify 工具 + 注册（2026-07-08 done，11 tests passed）
-- [x] V4 /api/debug/verify（2026-07-08 done，7 tests passed）
-- [x] V5 注入 spec_diffs + 文档（2026-07-08 done，4 tests passed，V1-V5 全部完成）
+
+- [x] V1 控制台错误捕获
+- [ ] V2 默认开启网络捕获 + 性能优化
+- [ ] V3 网络错误自动标记静默失败
+- [ ] V4 SDK 初始化追踪 + 请求关联
+- [ ] V5 增强 ingest 端点
+- [ ] V6 自动检测 UI 静默失败
 
 ---
 
-## 四、关键约束（不可违反）
+## 七、关键约束（不可违反）
 
-- 只改 `app/`；保留 TraceStorage/SessionStorage 抽象、MemoryStore/PGStore、middleware.py 安全栈、error_handlers、metrics/health、测试结构。
-- 不复制外部代码，按 proj1 架构重新实现。
-- 每模块少量文件、做完即停、汇报"改了什么/为什么/如何测试"。
+参见 [AI_RULES.md](./AI_RULES.md)：
+
+- 只改必要文件；保留 TraceStorage/SessionStorage 抽象、MemoryStore/PGStore、middleware.py 安全栈、error_handlers、metrics/health、测试结构
+- 不复制外部代码，按现有架构重新实现
+- 每模块少量文件、做完即停、汇报"改了什么/为什么/如何测试"
+- PGStore 修改须先输出问题分析、影响范围、测试方案

@@ -118,7 +118,8 @@ def health():
             from app.mcp.core.storage.pg_store import _get_pool
             pool = _get_pool()
             conn = pool.getconn()
-            conn.execute("SELECT 1")
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
             pool.putconn(conn)
             storage_detail = "postgresql (connected)"
         except Exception:
@@ -148,6 +149,25 @@ def dashboard():
     if dashboard_path.exists():
         return HTMLResponse(dashboard_path.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
+
+
+@app.get("/demo", response_class=HTMLResponse)
+def demo():
+    """网络捕获演示页面"""
+    demo_path = pathlib.Path(__file__).parent / "web" / "network_capture_demo.html"
+    if demo_path.exists():
+        return HTMLResponse(demo_path.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Demo page not found</h1>", status_code=404)
+
+
+@app.get("/ai-debug.js")
+def ai_debug_js():
+    """SDK 脚本文件"""
+    sdk_path = pathlib.Path(__file__).parent.parent / "browser-sdk" / "ai-debug.js"
+    if sdk_path.exists():
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(sdk_path.read_text(encoding="utf-8"), media_type="application/javascript")
+    return HTMLResponse("<h1>SDK not found</h1>", status_code=404)
 
 
 @app.post("/debug")

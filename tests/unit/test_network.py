@@ -80,3 +80,53 @@ def test_get_network_trace_empty_for_unknown():
     got = network_api.tool_get_network_trace("no-such-trace")
     assert got["found"] is False
     assert got["count"] == 0
+
+
+def test_tool_ingest_redacts_json_request_body():
+    tid = trace_repo.save_trace("E", "m", [])
+    network_api.tool_ingest_network(
+        {"url": "http://x/api/login", "request_body": '{"password":"123456","username":"admin"}'},
+        trace_id=tid,
+    )
+    rec = network_api.tool_get_network_trace(tid)["records"][0]
+    assert "123456" not in rec["request_body"]
+    assert "admin" in rec["request_body"]
+
+
+def test_tool_ingest_redacts_json_response_body():
+    tid = trace_repo.save_trace("E", "m", [])
+    network_api.tool_ingest_network(
+        {"url": "http://x/api/token", "response_body": '{"token":"sk-xxx-123","user_id":123}'},
+        trace_id=tid,
+    )
+    rec = network_api.tool_get_network_trace(tid)["records"][0]
+    assert "sk-xxx-123" not in rec["response_body"]
+    assert "123" in rec["response_body"]
+
+
+def test_ingest_network_route_via_testclient():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.ingest import router
+
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    resp = client.post("/ingest/network", json={
+        "record": {
+            "url": "http://example.com/api/test",
+            "method": "GET",
+            "status_code": 200,
+            "duration_ms": 100,
+            "request_body": '{"password":"secret"}',
+            "response_body": '{"token":"abc123"}',
+        },
+        "source": "browser-sdk",
+        "extra": {"session_id": "test-session"},
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["saved"] is True
+    assert body["record_id"]

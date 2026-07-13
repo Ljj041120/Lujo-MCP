@@ -24,7 +24,7 @@
 | v2.0 | 2026-07-07 | 团队 | 以真实痛点重构，新增 FR11–FR15 |
 | v3.0 | 2026-07-07 | 高级架构师 | **代码核实后修正实现状态**：标注自动捕获/宿主AI推理已落地；代码定位标记为"模块已实现但未接线+配置缺失"；静默失败/前端自动化确认为待开发；补充架构师痛点覆盖度矩阵与落地缺口 |
 | v4.0 | 2026-07-08 | 高级后端架构师 | **参考项目迁移完成（M1–M8）**：redaction/trace_repo/network/ui_event/git/silent_failure/ingest_error/build_debug_context 全部落地；6 个新工具双传输注册；FR13 采集链就绪（自动检测仍待建）；FR14/FR15 未纳入本次优先级 |
-| v4.2 | 2026-07-08 | 高级后端架构师 | **全量交付**：FR13 assert_engine+verify ✅、FR14 Playwright UI 遍历+verify_ui ✅、FR15 spec_store+闭环 ✅、浏览器 SDK TS ✅、多 LLM provider ✅、Web 控制台 Dashboard ✅。全量 162 passed / 6 skipped。 |
+| v4.2 | 2026-07-08 | 高级后端架构师 | **全量交付**：FR13 assert_engine+verify ✅、FR14 Playwright UI 遍历+verify_ui ✅、FR15 spec_store+闭环 ✅、浏览器 SDK TS ✅、多 LLM provider ✅、Web 控制台 Dashboard ✅。全量交付（测试状态以 [README.md](./README.md) 项目状态表为准）。 |
 
 ---
 
@@ -69,7 +69,7 @@
 | **宿主 AI 推理模式** | 服务只交付结构化原始数据，宿主 AI 自行推理 | P2 ✅ |
 | **LLM 分析 + 多 provider** | `analyzer.py`（openai/zhipu/custom）| 辅助 P2 ✅ |
 | **静默失败检测** | `assert_engine.py` + `verify` MCP 工具 + `/api/debug/verify` | P5/P6 ✅ |
-| **规范存储** | `spec_store.py`（dict+Lock + add_log 持久化）+ `/api/spec` CRUD | FR15 ✅ |
+| **规范存储** | `spec_store.py`（dict+Lock + add_log 持久化，预留 PG 工厂模式待迁移）+ `/api/spec` CRUD | FR15 ✅ |
 | **前端自动化验证** | `ui_runner.py`（Playwright）+ `verify_ui` MCP 工具 + `/api/debug/verify/ui` | P4 ✅ |
 | **浏览器 SDK** | `browser-sdk/ai-debug.js`（UMD/CJS/ESM） | P4/P5 ✅ |
 | **Web 控制台** | `dashboard.html` + `/api/dashboard/*` | 运维 ✅ |
