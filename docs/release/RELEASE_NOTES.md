@@ -7,10 +7,10 @@
 > - AI Debug Agent Phase 2 多 Agent DAG（AGENT-002，2026-07-30）：`RepairAgent` + `GitAgent`/`TestAgent`/`SecurityAgent` 并行审查
 > - MCP 工具数增至 17（新增 `repair_async` / `repair_result`）
 > - 测试基线：672 passed / 6 skipped / 0 failed（P2 修复后 657 passed，全量审查后持续加固至 672，见下方审查明细）
-> - ⚠️ **beta-release 全量审查（2026-07-27→2026-07-31）**：发现 P0×6 + P1×9 + P2×12 + 文档×5 = 32 项，已全部修复合入。10 真 bug 已修 + 13 误报 + 8 设计债已修 + 1 低优先。健康度 6.5/10 → **8.5/10**。详见 `docs/internal/release/claude-audit-consolidated.md` §十二
+> - ⚠️ **beta-release 全量审查（2026-07-27→2026-07-31）**：发现 P0×6 + P1×9 + P2×12 + 文档×5 = 32 项，已全部修复合入。10 真 bug 已修 + 13 误报 + 8 设计债已修 + 1 低优先。健康度 6.5/10 → **8.5/10**。
 > - ⚠️ **/metrics 鉴权行为变更**（SEC-08）：`metrics_auth_enabled=True` 时，/metrics 鉴权从旧版 `hmac.compare_digest(key, api_key or "")` 改为 `verify_api_key(key)`。旧代码在无 API_KEY 时允许访问，新代码返回 401。监控系统若依赖此端点需确认配置。
-> - ⚠️ **安全加固 + 线程安全修复（2026-08-01）**：修复 13 个缺陷（P0×3/P1×4/P2×6/P3×5）——RBAC 鉴权补全（`/metrics`、`/debug`、MCP 路由）、`threading.Lock` 保护 `SSEHub._queues` 与 `DashboardEventBus._subs` 竞态条件、SSE 流空闲超时、重复 `json.loads` 优化等。新增 3 个测试文件（22 用例）。测试基线：654 → 672 passed / 6 skipped / 0 failed。详见 `docs/internal/release/claude-audit-consolidated.md` §十二
-> > - **开源社区治理文件补充（2026-08-01）**：新增 CONTRIBUTING.md、CODE_OF_CONDUCT.md、SECURITY.md、Issue/PR 模板，README 补充多 Worker SSE 限制说明，新增 SSE 流式端点集成测试 4 项。集成测试基线：49 → 53 passed。详见 `docs/internal/release/claude-audit-consolidated.md` §九
+> - ⚠️ **安全加固 + 线程安全修复（2026-08-01）**：修复 13 个缺陷（P0×3/P1×4/P2×6/P3×5）——RBAC 鉴权补全（`/metrics`、`/debug`、MCP 路由）、`threading.Lock` 保护 `SSEHub._queues` 与 `DashboardEventBus._subs` 竞态条件、SSE 流空闲超时、重复 `json.loads` 优化等。新增 3 个测试文件（22 用例）。测试基线：654 → 672 passed / 6 skipped / 0 failed。
+> > - **开源社区治理文件补充（2026-08-01）**：新增 CONTRIBUTING.md、CODE_OF_CONDUCT.md、SECURITY.md、Issue/PR 模板，README 补充多 Worker SSE 限制说明，新增 SSE 流式端点集成测试 4 项。集成测试基线：49 → 53 passed。
 > - 上述增量属于 `v0.3.0` 之后的主干演进，正式版本号以后续发版说明为准
 
 **Version / 版本**: v0.3.0  
@@ -403,8 +403,5 @@ ruff>=0.8.0
 
 ## 相关链接 / Related Links
 
-- [完整功能交付矩阵 / Full Delivery Matrix](../internal/DELIVERY_MATRIX.md)
-- [稳定性验证报告 / Stability Report](../internal/STABILITY_REPORT.md)
 - [启动前检查清单 / Pre-flight Checklist](./PREFLIGHT_CHECKLIST.md)
 - [异常排查指南 / Troubleshooting Guide](./TROUBLESHOOTING.md)
-- [开发计划 / Development Plan](../internal/DEV_PLAN.md)

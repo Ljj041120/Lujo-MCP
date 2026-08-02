@@ -55,5 +55,3 @@ RBAC_ENABLED=true                     # 启用角色控制
 4. **输入层**：请求体大小限制、输入校验、路径遍历防护
 5. **输出层**：敏感信息脱敏、错误信息 sanitize
 6. **传输层**：CORS 白名单、安全 HTTP 头（CSP、X-Frame-Options 等）
-
-详见 [claude-audit-consolidated.md](docs/internal/release/claude-audit-consolidated.md) 安全审计章节。
