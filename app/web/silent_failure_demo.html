@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AI Debug MCP - 静默失败检测演示</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; padding: 40px; }
+  .container { max-width: 960px; margin: 0 auto; }
+  h1 { color: #58a6ff; border-bottom: 1px solid #21262d; padding-bottom: 16px; }
+  h2 { color: #79c0ff; margin-top: 32px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin: 16px 0; }
+  .label { color: #8b949e; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  pre { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+  .json-key { color: #79c0ff; }
+  .json-string { color: #a5d6ff; }
+  .json-boolean { color: #ffa657; }
+  .json-null { color: #ff7b72; }
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  .badge-fail { background: #da363033; color: #ff7b72; border: 1px solid #f8514955; }
+  .badge-silent { background: #d2992233; color: #e3b341; border: 1px solid #d2992255; }
+  .badge-ok { background: #23863633; color: #3fb950; border: 1px solid #23863655; }
+  .highlight { background: #f8514922; padding: 2px 4px; border-radius: 3px; }
+  .arrow { color: #8b949e; text-align: center; font-size: 24px; margin: 12px 0; }
+  button { background: #238636; color: #fff; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; margin-right: 12px; margin-bottom: 12px; }
+  button.secondary { background: #1f6feb; }
+  button.warning { background: #d29922; color: #111; }
+  .output { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 16px; white-space: pre-wrap; font-size: 13px; line-height: 1.5; min-height: 180px; }
+  .demo-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .status { color: #8b949e; font-size: 13px; margin-top: 8px; }
+  .fake-list { margin-top: 12px; padding-left: 18px; color: #8b949e; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>AI Debug MCP — 静默失败检测（Silent Failure Detection）</h1>
+  <p style="color:#8b949e">接口返回 200，无异常日志，但实际数据不符合规范。系统自动识别这类"看起来成功但实际失败"的问题。</p>
+
+  <h2>1. 实际请求结果（Actual）</h2>
+  <div class="card">
+    <div class="label">POST /api/users — 响应</div>
+    <pre>{
+  <span class="json-key">"status_code"</span>: <span class="json-boolean">200</span>,
+  <span class="json-key">"body"</span>: {
+    <span class="json-key">"data"</span>: <span class="json-null">null</span>,
+    <span class="json-key">"message"</span>: <span class="json-string">"success"</span>
+  }
+}</pre>
+    <div style="margin-top:12px"><span class="badge badge-ok">HTTP 200 OK</span> <span style="color:#8b949e;font-size:13px">表面成功，无异常</span></div>
+  </div>
+
+  <div class="arrow">↓ AI Debug MCP 自动比对规范</div>
+
+  <h2>2. 期望规范（Spec）</h2>
+  <div class="card">
+    <div class="label">期望：data 字段应为非空对象</div>
+    <pre>{
+  <span class="json-key">"kind"</span>: <span class="json-string">"api"</span>,
+  <span class="json-key">"target"</span>: <span class="json-string">"/api/users"</span>,
+  <span class="json-key">"expect"</span>: {
+    <span class="json-key">"status"</span>: <span class="json-boolean">200</span>,
+    <span class="json-key">"body_rules"</span>: {
+      <span class="json-key">"data"</span>: { <span class="json-key">"name"</span>: <span class="json-string">"expected"</span> }
+    }
+  }
+}</pre>
+  </div>
+
+  <div class="arrow">↓ verify 引擎断言结果</div>
+
+  <h2>3. 检测结果（VerifyResult）</h2>
+  <div class="card">
+    <div style="margin-bottom:16px">
+      <span class="badge badge-fail">matched: false</span>
+      &nbsp;
+      <span class="badge badge-silent">silent_failure: true</span>
+    </div>
+    <pre>{
+  <span class="json-key">"matched"</span>: <span class="json-boolean">false</span>,
+  <span class="json-key">"diffs"</span>: [
+    {
+      <span class="json-key">"field"</span>: <span class="json-string">"body.data"</span>,
+      <span class="json-key">"expected"</span>: { <span class="json-key">"name"</span>: <span class="json-string">"expected"</span> },
+      <span class="json-key">"actual"</span>: <span class="json-null">null</span>
+    }
+  ],
+  <span class="json-key">"silent_failure"</span>: <span class="json-boolean">true</span>
+}</pre>
+    <div style="margin-top:16px;padding:12px;background:#f8514911;border-radius:6px;border-left:3px solid #f85149">
+      <strong style="color:#ff7b72">⚠ 静默失败 detected</strong><br>
+      <span style="color:#8b949e;font-size:13px">status_code=200（非 4xx/5xx），无异常，但 body.data 不符合规范 → 自动判定为静默失败</span>
+    </div>
+  </div>
+
+  <h2>调用方式</h2>
+  <div class="card">
+    <div class="label">POST /api/debug/verify</div>
+    <pre>curl -X POST http://localhost:8000/api/debug/verify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "actual": {"status_code": 200, "body": {"data": null}},
+    "spec": {
+      "kind": "api",
+      "target": "/api/users",
+      "expect": {
+        "status": 200,
+        "body_rules": {"data": {"name": "expected"}}
+      }
+    }
+  }'</pre>
+  </div>
+
+  <h2>4. V6 自动检测演示（Browser SDK）</h2>
+  <div class="card">
+    <p style="color:#8b949e;margin-bottom:16px">下面这组按钮演示刚新增的 SDK V6 能力：点击后如果页面没有发生 DOM 变化、没有路由变化、也没有网络请求，SDK 会在超时窗口后自动上报 silent failure。</p>
+
+    <div class="demo-panel">
+      <div>
+        <div class="label">交互区</div>
+        <button id="silentButton">点击后“假装提交”但不更新 UI</button>
+        <button id="successButton" class="secondary">点击后正常更新 UI</button>
+        <button id="manualButton" class="warning">手动触发 reportSilentFailure</button>
+        <div id="uiStatus" class="status">等待交互...</div>
+        <ul id="resultList" class="fake-list">
+          <li>订单 #1001 - 已完成</li>
+          <li>订单 #1002 - 处理中</li>
+        </ul>
+      </div>
+
+      <div>
+        <div class="label">最近一次 silent failure payload</div>
+        <div id="payloadOutput" class="output">点击左侧按钮后，这里会展示 SDK 即将上报的 payload。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/ai-debug.js"></script>
+<script>
+  var uiStatus = document.getElementById("uiStatus");
+  var payloadOutput = document.getElementById("payloadOutput");
+  var resultList = document.getElementById("resultList");
+
+  AiDebug.init({
+    endpoint: "http://localhost:8000",
+    apiKey: "test_secret_key_456",
+    captureNetwork: true,
+    captureUI: true,
+    autoDetectNetworkErrors: true,
+    autoDetectUISilentFailures: true,
+    uiSilentFailureTimeoutMs: 1400,
+    uiSilentFailureObserveSelector: "body",
+    silentFailureContextSize: 10
+  });
+
+  AiDebug.onSilentFailureReport(function (payload) {
+    payloadOutput.textContent = JSON.stringify(payload, null, 2);
+  });
+
+  document.getElementById("silentButton").addEventListener("click", function () {
+    // 故意不修改任何 DOM，模拟"假装提交但不更新 UI"的场景
+    console.log("[Demo] silentButton clicked, no DOM update");
+  });
+
+  document.getElementById("successButton").addEventListener("click", function () {
+    var item = document.createElement("li");
+    item.textContent = "订单 #" + Math.floor(Math.random() * 9000 + 1000) + " - 已同步到页面";
+    resultList.appendChild(item);
+    uiStatus.textContent = "本次交互已产生 DOM 变化，不应被判定为静默失败。";
+  });
+
+  document.getElementById("manualButton").addEventListener("click", function () {
+    AiDebug.reportSilentFailure({
+      description: "Manual silent failure report from demo page",
+      observed: "clicked button but no visible success message",
+      expected: { type: "toast", text: "保存成功" }
+    });
+    uiStatus.textContent = "已手动触发一次 silent failure 上报。";
+  });
+</script>
+</body>
+</html>

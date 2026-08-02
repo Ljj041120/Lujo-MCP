@@ -1,0 +1,32 @@
+# 核心框架
+fastapi==0.115.0
+uvicorn[standard]==0.51.0
+python-dotenv==1.0.1
+pydantic-settings==2.5.2
+httpx==0.28.1
+
+# AI / LLM
+openai==2.47.0
+
+# 存储
+psycopg2-binary==2.9.12
+asyncpg==0.29.0
+redis==5.0.8
+qdrant-client==1.18.0
+
+# MCP 协议
+mcp==1.1.2
+
+# 可观测性
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-grpc==1.44.0
+
+# 弹性
+pybreaker==1.4.1
+
+# 系统
+psutil==6.0.0
+
+# 可选：UI 验证（pip install playwright 后再运行 playwright install）
+# playwright>=1.40.0

@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lujo-MCP Dashboard</title>
+<style>
+  :root {
+    --bg-primary: #0f1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #1c2128;
+    --bg-hover: #1c2840;
+    --border: #30363d;
+    --border-light: #21262d;
+    --text-primary: #e1e4e8;
+    --text-secondary: #8b949e;
+    --text-muted: #484f58;
+    --accent-blue: #58a6ff;
+    --accent-green: #3fb950;
+    --accent-red: #f85149;
+    --accent-yellow: #d2991d;
+    --accent-purple: #bc8cff;
+    --radius: 8px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 3px rgba(0,0,0,.3);
+    --transition: .15s ease;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.5;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .header-logo {
+    width: 32px; height: 32px;
+    background: var(--accent-blue);
+    border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: bold; color: #fff;
+    box-shadow: 0 1px 4px rgba(88,166,255,.3);
+  }
+  .header h1 { font-size: 18px; color: var(--accent-blue); font-weight: 600; }
+  .header .meta { display: flex; align-items: center; gap: 16px; }
+  .header .refresh { font-size: 12px; color: var(--text-secondary); cursor: default; }
+  .header .refresh.loading { opacity: .6; }
+  .sse-badge {
+    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    background: var(--accent-green); color: #fff; opacity: .8;
+  }
+  .sse-badge.off { background: var(--text-muted); }
+
+  /* ── Stats ── */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    padding: 16px 24px;
+  }
+  .stat-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    text-align: center;
+    transition: border-color var(--transition), transform var(--transition);
+    box-shadow: 0 1px 2px rgba(0,0,0,.2);
+  }
+  .stat-card:hover {
+    border-color: var(--accent-blue);
+    transform: translateY(-1px);
+  }
+  .stat-card:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+  }
+  .stat-card .num {
+    font-size: 28px; font-weight: 700;
+    transition: color .3s;
+  }
+  .stat-card .num.updating { opacity: .5; }
+  .stat-card .label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; text-transform: uppercase; letter-spacing: .5px; }
+  .stat-card.err .num { color: var(--accent-red); }
+  .stat-card.silent .num { color: var(--accent-yellow); }
+  .stat-card.spec .num { color: var(--accent-green); }
+
+  /* ── Layout ── */
+  .container {
+    display: flex;
+    gap: 16px;
+    padding: 0 24px 24px;
+    height: calc(100vh - 180px);
+  }
+  .panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  }
+  .panel-left { flex: 1; }
+  .panel-right { flex: 1; }
+  .panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  /* ── Trace List ── */
+  .trace-list { flex: 1; overflow-y: auto; }
+  .trace-item {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-light);
+    cursor: pointer;
+    transition: background var(--transition);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .trace-item:hover { background: var(--bg-tertiary); }
+  .trace-item:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: -2px;
+  }
+  .trace-item.active { background: var(--bg-hover); border-left: 3px solid var(--accent-blue); }
+  .trace-item .info { flex: 1; min-width: 0; }
+  .trace-item .type { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .trace-item .msg {
+    font-size: 11px; color: var(--text-secondary); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .trace-item .badge-group { display: flex; gap: 4px; flex-shrink: 0; margin-left: 8px; flex-wrap: wrap; }
+  .badge {
+    font-size: 10px; padding: 2px 6px; border-radius: 3px;
+    white-space: nowrap; font-weight: 500;
+  }
+  .badge-error { background: #f8514940; color: var(--accent-red); }
+  .badge-silent { background: #d2991d40; color: var(--accent-yellow); }
+  .badge-ok { background: #3fb95040; color: var(--accent-green); }
+  .badge-verify { background: #58a6ff40; color: var(--accent-blue); }
+  .badge-info { background: #bc8cff40; color: var(--accent-purple); }
+
+  /* ── Detail Panel ── */
+  .detail { flex: 1; overflow-y: auto; padding: 16px; }
+  .detail-empty { color: var(--text-muted); text-align: center; padding: 60px 20px; font-size: 14px; }
+  .detail h3 { font-size: 14px; margin-bottom: 8px; color: var(--accent-blue); }
+  .detail-section { margin-bottom: 20px; }
+  .detail-section .label {
+    font-size: 11px; color: var(--text-secondary); text-transform: uppercase;
+    letter-spacing: .5px; margin-bottom: 6px;
+  }
+  .detail-section .value { font-size: 13px; word-break: break-all; }
+
+  .diff-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+  .diff-table th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-weight: 500; }
+  .diff-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-light); }
+  .diff-table .exp { color: var(--accent-green); }
+  .diff-table .act { color: var(--accent-red); }
+  .no-data { color: var(--text-muted); font-style: italic; font-size: 12px; }
+
+  .code-snippet {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-top: 8px;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 12px;
+    overflow-x: auto;
+    white-space: pre;
+    line-height: 1.6;
+  }
+
+  .loading { text-align: center; padding: 20px; color: var(--text-secondary); }
+  .loading::after { content: '...'; animation: dots 1.5s steps(4, end) infinite; }
+  @keyframes dots { 0%, 20% { content: ''; } 40% { content: '.'; } 60% { content: '..'; } 80%, 100% { content: '...'; } }
+
+  /* ── Error State ── */
+  .error-state { color: var(--accent-red); text-align: center; padding: 20px; font-size: 13px; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .container { flex-direction: column; height: auto; }
+    .panel { min-height: 300px; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .header { flex-wrap: wrap; gap: 8px; }
+  }
+  @media (max-width: 375px) {
+    .stats { grid-template-columns: 1fr; gap: 8px; padding: 8px 12px; }
+    .stat-card { padding: 12px 16px; }
+    .stat-card .num { font-size: 22px; }
+    .header { padding: 10px 12px; flex-direction: column; align-items: flex-start; }
+    .header .meta { width: 100%; justify-content: space-between; }
+    .container { padding: 0 12px 12px; }
+    .panel-left { min-height: 200px; }
+    .panel-right { min-height: 200px; }
+    .detail { padding: 12px; }
+  }
+
+  /* ── Focus Visible ── */
+  :focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+  }
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="header-logo">D</div>
+    <h1>Lujo-MCP</h1>
+  </div>
+  <div class="meta">
+    <span class="sse-badge" id="sse-badge">● Live</span>
+    <span class="refresh" id="refresh">Initializing...</span>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat-card" id="stat-total"><div class="num">--</div><div class="label">Total Traces</div></div>
+  <div class="stat-card err" id="stat-exc"><div class="num">--</div><div class="label">Exceptions</div></div>
+  <div class="stat-card silent" id="stat-silent"><div class="num">--</div><div class="label">Silent Failures</div></div>
+  <div class="stat-card spec" id="stat-specs"><div class="num">--</div><div class="label">Specs</div></div>
+</div>
+
+<div class="container">
+  <div class="panel panel-left">
+    <div class="panel-header">
+      <span>Recent Traces</span>
+      <span id="trace-count" style="font-size:11px;color:var(--text-muted)"></span>
+    </div>
+    <div class="trace-list" id="trace-list"><div class="loading">Loading</div></div>
+  </div>
+  <div class="panel panel-right">
+    <div class="panel-header">Trace Detail</div>
+    <div class="detail" id="detail"><div class="detail-empty">← Select a trace to view details</div></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+  // ── Utilities ──
+  const esc = (s) => s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const apiKey = new URLSearchParams(location.search).get('api_key') || '';
+
+  async function fetchJSON(url) {
+    const headers = {};
+    if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error(res.statusText);
+    return res.json();
+  }
+
+  // ── Stats ──
+  async function loadStats() {
+    try {
+      const s = await fetchJSON('/api/dashboard/stats');
+      document.getElementById('stat-total').querySelector('.num').textContent = s.total_traces ?? '--';
+      document.getElementById('stat-exc').querySelector('.num').textContent = s.exceptions ?? '--';
+      document.getElementById('stat-silent').querySelector('.num').textContent = s.silent_failures ?? '--';
+      document.getElementById('stat-specs').querySelector('.num').textContent = s.spec_count ?? '--';
+      document.getElementById('trace-count').textContent = `${s.total_traces ?? 0} total`;
+    } catch(e) {
+      console.error('stats error', e);
+    }
+  }
+
+  function formatTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts * 1000);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffMin < 1440) return `${Math.floor(diffMin / 60)}h ago`;
+    return d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN');
+  }
+
+  // ── Trace List ──
+  async function loadTraces() {
+    const list = document.getElementById('trace-list');
+    try {
+      const data = await fetchJSON('/api/dashboard/traces?limit=50');
+      if (!data.traces || !data.traces.length) {
+        list.innerHTML = '<div class="loading">No traces yet — waiting for data...</div>';
+        return;
+      }
+      list.innerHTML = data.traces.map(t => {
+        const badges = [];
+        if (t.has_silent_failure) badges.push('<span class="badge badge-silent">SILENT</span>');
+        if (t.verify_count) badges.push(`<span class="badge badge-verify">VERIFY×${t.verify_count}</span>`);
+        if (t.has_repair) badges.push('<span class="badge badge-info">REPAIR</span>');
+        const kindBadge = t.has_silent_failure ? 'badge-silent' : 'badge-error';
+        return `<div class="trace-item" data-tid="${t.trace_id}" onclick="window.dashboard && window.dashboard.selectTrace('${t.trace_id}')" tabindex="0" role="button">
+          <div class="info">
+            <div class="type">${esc(t.type)} ${badges.join(' ')}</div>
+            <div class="msg">${esc(t.message)} · ${formatTime(t.timestamp)} · ×${t.occurrence_count ?? 1}</div>
+          </div>
+          <span class="badge ${kindBadge}">${esc(t.trace_kind)}</span>
+        </div>`;
+      }).join('');
+    } catch(e) {
+      list.innerHTML = '<div class="error-state">⚠ Failed to load traces. Is the server running?</div>';
+    }
+  }
+
+  // ── Trace Detail ──
+  async function selectTrace(tid) {
+    document.querySelectorAll('.trace-item').forEach(el => el.classList.remove('active'));
+    const el = document.querySelector(`[data-tid="${tid}"]`);
+    if (el) el.classList.add('active');
+
+    const detail = document.getElementById('detail');
+    detail.innerHTML = '<div class="loading">Loading</div>';
+
+    try {
+      const t = await fetchJSON('/api/dashboard/trace/' + encodeURIComponent(tid));
+      let html = '';
+
+      if (t.exception) {
+        html += '<div class="detail-section"><div class="label">Exception</div>';
+        html += `<div class="value">${esc(t.exception.type)}: ${esc(t.exception.message)}</div>`;
+        if (t.exception.frames?.length) {
+          html += '<div class="code-snippet">' + t.exception.frames.map(f =>
+            `${esc(f.file)}:${f.line} in ${esc(f.function)}`
+          ).join('\n') + '</div>';
+        }
+        html += '</div>';
+      }
+
+      if (t.errors?.length) {
+        html += '<div class="detail-section"><div class="label">Errors</div>';
+        t.errors.forEach(e => {
+          html += `<div class="value">${esc(typeof e === 'string' ? e : e.message||'')}</div>`;
+        });
+        html += '</div>';
+      }
+
+      html += '<div class="detail-section"><div class="label">Spec Diffs</div>';
+      if (t.spec_diffs?.length) {
+        html += t.spec_diffs.map(diff => {
+          let section = `<div class="value" style="margin-bottom:8px">`;
+          section += `Matched: <b style="color:${diff.matched ? 'var(--accent-green)' : 'var(--accent-red)'}">${diff.matched}</b>`;
+          if (diff.silent_failure) section += ' | <b style="color:var(--accent-yellow)">Silent Failure</b>';
+          if (diff.spec_id) section += ` | Spec: ${esc(diff.spec_id)}`;
+          section += '</div>';
+          if (diff.diffs?.length) {
+            section += '<table class="diff-table"><tr><th>Field</th><th>Expected</th><th>Actual</th></tr>';
+            section += diff.diffs.map(d =>
+              `<tr><td>${esc(d.field)}</td><td class="exp">${esc(String(d.expected))}</td><td class="act">${esc(String(d.actual))}</td></tr>`
+            ).join('');
+            section += '</table>';
+          }
+          return section;
+        }).join('');
+      } else {
+        html += '<div class="no-data">No spec diffs — verify not yet run for this trace</div>';
+      }
+      html += '</div>';
+
+      if (t.code_snippets?.length) {
+        html += '<div class="detail-section"><div class="label">Code Snippets</div>';
+        t.code_snippets.forEach(s => {
+          if (s.found) {
+            html += `<div class="code-snippet">${esc(s.file)}:${s.line}\n${esc(s.content||'')}</div>`;
+          }
+        });
+        html += '</div>';
+      }
+
+      detail.innerHTML = html;
+    } catch(e) {
+      detail.innerHTML = '<div class="error-state">⚠ Failed to load trace detail</div>';
+    }
+  }
+
+  // ── Refresh ──
+  async function refresh() {
+    const el = document.getElementById('refresh');
+    el.classList.add('loading');
+    el.textContent = 'Refreshing...';
+    await Promise.all([loadStats(), loadTraces()]);
+    el.classList.remove('loading');
+    el.textContent = 'Updated ' + new Date().toLocaleTimeString('zh-CN');
+  }
+
+  // ── SSE ──
+  let _refreshTimer = null;
+  function scheduleRefresh() {
+    if (_refreshTimer) return;
+    _refreshTimer = setTimeout(() => { _refreshTimer = null; refresh(); }, 500);
+  }
+
+  function initSSE() {
+    try {
+      const url = '/api/dashboard/stream' + (apiKey ? '?api_key=' + encodeURIComponent(apiKey) : '');
+      const es = new EventSource(url);
+      es.onmessage = scheduleRefresh;
+      es.onerror = () => {
+        try { es.close(); } catch(e) {}
+        document.getElementById('sse-badge').textContent = '● Reconnecting';
+        document.getElementById('sse-badge').className = 'sse-badge off';
+        setTimeout(initSSE, 5000);
+      };
+      es.onopen = () => {
+        document.getElementById('sse-badge').textContent = '● Live';
+        document.getElementById('sse-badge').className = 'sse-badge';
+      };
+    } catch(e) {
+      console.error('SSE init failed', e);
+      document.getElementById('sse-badge').textContent = '● Off';
+      document.getElementById('sse-badge').className = 'sse-badge off';
+    }
+  }
+
+  // 将 selectTrace 暴露到全局（供 onclick 调用）
+  window.dashboard = { selectTrace };
+
+  // ── Init ──
+  refresh();
+  setInterval(refresh, 10000);
+  initSSE();
+})();
+</script>
+</body>
+</html>
