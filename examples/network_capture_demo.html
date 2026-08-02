@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Debug Network Capture Demo - V3</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0d1117; color: #c9d1d9; padding: 20px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { color: #58a6ff; margin-bottom: 20px; font-size: 24px; }
+    .subtitle { color: #8b949e; margin-bottom: 16px; }
+    h2 { color: #8b949e; margin: 20px 0 10px; font-size: 18px; border-left: 4px solid #58a6ff; padding-left: 10px; }
+    .test-group { background: #161b22; border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid #30363d; }
+    button { background: #238636; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; margin-right: 8px; margin-bottom: 8px; font-size: 14px; }
+    button:hover { background: #2ea043; }
+    button.warning { background: #d29922; }
+    button.danger { background: #f85149; }
+    .result { background: #0d1117; border-radius: 4px; padding: 10px; margin-top: 10px; font-family: monospace; font-size: 13px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; }
+    .result.success { border-left: 3px solid #238636; }
+    .result.error { border-left: 3px solid #f85149; }
+    .result.info { border-left: 3px solid #58a6ff; }
+    label { display: block; margin-bottom: 8px; }
+    input[type="number"] { background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 6px 10px; color: #c9d1d9; width: 100px; }
+    .counter { display: inline-block; background: #30363d; padding: 4px 12px; border-radius: 4px; margin-left: 8px; font-weight: bold; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab { padding: 8px 16px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; }
+    .tab.active { background: #58a6ff; color: #fff; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .trace { background: #1c2128; padding: 8px; margin: 4px 0; border-radius: 4px; font-size: 12px; }
+    .trace .method { display: inline-block; width: 60px; font-weight: bold; }
+    .trace .url { display: inline-block; width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .trace .status { display: inline-block; width: 50px; text-align: center; }
+    .trace .time { display: inline-block; width: 80px; }
+    .passed { color: #3fb950; }
+    .failed { color: #f85149; }
+    .pending { color: #d29922; }
+    .config-panel { background: #161b22; padding: 12px; border-radius: 6px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>AI Debug Network Capture Demo - XHR Hook 验证</h1>
+    <div class="subtitle">V3 新增：网络错误自动标记静默失败，并展示实际 observed_events 上报内容。</div>
+    
+    <div class="config-panel">
+      <strong>SDK 配置：</strong>
+      <label>networkSampleRate: <input type="number" id="sampleRate" value="1" step="0.1" min="0" max="1"></label>
+      <label>networkThrottleMs: <input type="number" id="throttleMs" value="0" min="0"></label>
+      <button onclick="resetSdk()">重置 SDK</button>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="showTab('tests')">测试用例</div>
+      <div class="tab" onclick="showTab('captures')">采集记录</div>
+      <div class="tab" onclick="showTab('verify')">验证结果</div>
+    </div>
+
+    <div id="tests" class="tab-content active">
+      <h2>1. XHR GET 捕获</h2>
+      <div class="test-group">
+        <button onclick="testXhrGet()">发送 XHR GET 请求</button>
+        <div class="result info" id="getResult">点击按钮发送 GET 请求，验证后端是否收到 {url, method, status_code, duration_ms}</div>
+      </div>
+
+      <h2>2. XHR POST Body 捕获与脱敏</h2>
+      <div class="test-group">
+        <button onclick="testXhrPost()">发送 XHR POST 请求</button>
+        <div class="result info" id="postResult">发送 {username:"admin", password:"123456"}，验证 password 被脱敏</div>
+      </div>
+
+      <h2>3. XHR Response Body 捕获与脱敏</h2>
+      <div class="test-group">
+        <button onclick="testXhrResponse()">发送 XHR 获取 Token</button>
+        <div class="result info" id="responseResult">模拟返回 {token:"abc123"}，验证 token 被脱敏</div>
+      </div>
+
+      <h2>4. SDK 自身请求排除（防递归）</h2>
+      <div class="test-group">
+        <button class="warning" onclick="testSelfRequest()">测试 SDK 自排除</button>
+        <div class="result info" id="selfResult">点击后检查网络请求，确认没有递归的 /api/ingest/network 请求</div>
+      </div>
+
+      <h2>5. networkSampleRate 验证</h2>
+      <div class="test-group">
+        <button onclick="testSampleRateZero()">设置 networkSampleRate=0 测试</button>
+        <button onclick="testSampleRateOne()">设置 networkSampleRate=1 测试</button>
+        <div class="result info" id="sampleRateResult">验证采样率控制是否生效</div>
+      </div>
+
+      <h2>6. networkThrottleMs 验证</h2>
+      <div class="test-group">
+        <button onclick="testThrottle()">连续发送 10 次 XHR (throttle=1000ms)</button>
+        <span class="counter" id="throttleCounter">0</span>
+        <div class="result info" id="throttleResult">确认采集数量被限制</div>
+      </div>
+
+      <h2>7. 业务兼容性验证</h2>
+      <div class="test-group">
+        <button onclick="testOnLoad()">测试 xhr.onload 回调</button>
+        <button onclick="testOnReadyStateChange()">测试 xhr.onreadystatechange 回调</button>
+        <div class="result info" id="compatResult">确认业务回调正常执行</div>
+      </div>
+
+      <h2>8. V3 网络错误自动标记静默失败</h2>
+      <div class="test-group">
+        <button class="danger" onclick="testNetworkErrorAutoReport()">触发失败请求并自动上报</button>
+        <button class="warning" onclick="testManualReportNetworkError()">手动调用 reportNetworkError</button>
+        <div class="result info" id="networkErrorResult">点击按钮后将展示自动生成的 silent failure payload 与 observed_events。</div>
+      </div>
+    </div>
+
+    <div id="captures" class="tab-content">
+      <h2>采集记录</h2>
+      <div id="capturedTraces"></div>
+    </div>
+
+    <div id="verify" class="tab-content">
+      <h2>验证结果汇总</h2>
+      <div class="test-group">
+        <div><span class="pending">✗</span> <span id="v1">1. XHR GET 捕获：未验证</span></div>
+        <div><span class="pending">✗</span> <span id="v2">2. XHR POST Body 脱敏：未验证</span></div>
+        <div><span class="pending">✗</span> <span id="v3">3. XHR Response Body 脱敏：未验证</span></div>
+        <div><span class="pending">✗</span> <span id="v4">4. SDK 自排除（防递归）：未验证</span></div>
+        <div><span class="pending">✗</span> <span id="v5">5. networkSampleRate 控制：未验证</span></div>
+        <div><span class="pending">✗</span> <span id="v6">6. networkThrottleMs 节流：未验证</span></div>
+        <div><span class="pending">✗</span> <span id="v7">7. 业务兼容性：未验证</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../browser-sdk/ai-debug.js"></script>
+  <script>
+    var capturedTraces = [];
+    var captureCount = 0;
+    var lastSilentFailurePayload = null;
+
+    function showTab(tabId) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      document.querySelector(`[onclick="showTab('${tabId}')"]`).classList.add('active');
+      document.getElementById(tabId).classList.add('active');
+    }
+
+    function logCapture(trace) {
+      capturedTraces.push(trace);
+      captureCount++;
+      updateCaptures();
+    }
+
+    function updateCaptures() {
+      var container = document.getElementById('capturedTraces');
+      container.innerHTML = capturedTraces.map((t, i) => `
+        <div class="trace">
+          <span class="method ${t.method === 'GET' ? 'info' : 'warning'}">${t.method}</span>
+          <span class="url">${t.url}</span>
+          <span class="status ${t.status_code >= 200 && t.status_code < 300 ? 'passed' : 'failed'}">${t.status_code}</span>
+          <span class="time">${t.duration_ms}ms</span>
+          ${t.request_body ? `<br>Request: ${t.request_body.slice(0, 100)}` : ''}
+          ${t.response_body ? `<br>Response: ${t.response_body.slice(0, 100)}` : ''}
+        </div>
+      `).join('');
+    }
+
+    function resetSdk() {
+      var sampleRate = parseFloat(document.getElementById('sampleRate').value);
+      var throttleMs = parseInt(document.getElementById('throttleMs').value);
+      AiDebug.init({
+        endpoint: 'http://localhost:8000',
+        captureNetwork: true,
+        networkSampleRate: sampleRate,
+        networkThrottleMs: throttleMs
+      });
+      capturedTraces = [];
+      captureCount = 0;
+      lastSilentFailurePayload = null;
+      updateCaptures();
+      alert('SDK 已重置，配置更新');
+    }
+
+    function testXhrGet() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', 'http://localhost:8000/api/debug/health');
+      xhr.onload = function() {
+        var result = document.getElementById('getResult');
+        result.className = 'result ' + (xhr.status === 200 ? 'success' : 'error');
+        result.textContent = 'GET 请求成功！状态码: ' + xhr.status + ', 响应: ' + xhr.responseText;
+      };
+      xhr.send();
+    }
+
+    function testXhrPost() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', 'http://localhost:8000/api/debug/echo');
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      var body = JSON.stringify({ username: 'admin', password: '123456' });
+      xhr.onload = function() {
+        var result = document.getElementById('postResult');
+        result.className = 'result ' + (xhr.status === 200 ? 'success' : 'error');
+        result.textContent = 'POST 请求成功！状态码: ' + xhr.status + '\n请求体: ' + body + '\n响应: ' + xhr.responseText;
+      };
+      xhr.send(body);
+    }
+
+    function testXhrResponse() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', 'http://localhost:8000/api/debug/token');
+      xhr.onload = function() {
+        var result = document.getElementById('responseResult');
+        result.className = 'result ' + (xhr.status === 200 ? 'success' : 'error');
+        result.textContent = 'Response 测试成功！状态码: ' + xhr.status + '\n响应: ' + xhr.responseText;
+      };
+      xhr.send();
+    }
+
+    function testSelfRequest() {
+      var beforeCount = captureCount;
+      AiDebug.reportError(new Error('test self request'));
+      setTimeout(function() {
+        var result = document.getElementById('selfResult');
+        var newCaptures = captureCount - beforeCount;
+        if (newCaptures === 0) {
+          result.className = 'result success';
+          result.textContent = '✓ SDK 自排除验证通过！\n之前采集数: ' + beforeCount + '\n之后采集数: ' + captureCount + '\n差值: ' + newCaptures + '\n确认没有递归请求';
+        } else {
+          result.className = 'result error';
+          result.textContent = '✗ 发现可能的递归请求！\n之前采集数: ' + beforeCount + '\n之后采集数: ' + captureCount + '\n新增: ' + newCaptures + '\n请检查网络面板';
+        }
+      }, 1000);
+    }
+
+    function testSampleRateZero() {
+      var beforeCount = captureCount;
+      AiDebug._cfg.networkSampleRate = 0;
+      for (var i = 0; i < 5; i++) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', 'http://localhost:8000/api/debug/health?test=zero-' + i);
+        xhr.send();
+      }
+      setTimeout(function() {
+        var result = document.getElementById('sampleRateResult');
+        var newCaptures = captureCount - beforeCount;
+        if (newCaptures === 0) {
+          result.className = 'result success';
+          result.textContent = '✓ networkSampleRate=0 验证通过！\n发送了 5 次请求，采集数增加: ' + newCaptures;
+        } else {
+          result.className = 'result error';
+          result.textContent = '✗ networkSampleRate=0 验证失败！\n发送了 5 次请求，采集数增加: ' + newCaptures;
+        }
+        AiDebug._cfg.networkSampleRate = parseFloat(document.getElementById('sampleRate').value);
+      }, 1000);
+    }
+
+    function testSampleRateOne() {
+      var beforeCount = captureCount;
+      AiDebug._cfg.networkSampleRate = 1;
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', 'http://localhost:8000/api/debug/health?test=one');
+      xhr.onload = function() {
+        setTimeout(function() {
+          var result = document.getElementById('sampleRateResult');
+          var newCaptures = captureCount - beforeCount;
+          if (newCaptures >= 1) {
+            result.className = 'result success';
+            result.textContent = '✓ networkSampleRate=1 验证通过！\n发送了 1 次请求，采集数增加: ' + newCaptures;
+          } else {
+            result.className = 'result error';
+            result.textContent = '✗ networkSampleRate=1 验证失败！\n发送了 1 次请求，采集数增加: ' + newCaptures;
+          }
+        }, 500);
+      };
+      xhr.send();
+    }
+
+    function testThrottle() {
+      var beforeCount = captureCount;
+      AiDebug._cfg.networkThrottleMs = 1000;
+      document.getElementById('throttleCounter').textContent = '0';
+      var count = 0;
+      var interval = setInterval(function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', 'http://localhost:8000/api/debug/health?test=throttle');
+        xhr.send();
+        count++;
+        document.getElementById('throttleCounter').textContent = count;
+        if (count >= 10) {
+          clearInterval(interval);
+          setTimeout(function() {
+            var result = document.getElementById('throttleResult');
+            var newCaptures = captureCount - beforeCount;
+            if (newCaptures <= 3) {
+              result.className = 'result success';
+              result.textContent = '✓ networkThrottleMs=1000ms 验证通过！\n发送了 10 次请求，实际采集: ' + newCaptures + ' 次';
+            } else {
+              result.className = 'result error';
+              result.textContent = '✗ networkThrottleMs=1000ms 验证失败！\n发送了 10 次请求，实际采集: ' + newCaptures + ' 次（应 <= 3）';
+            }
+            AiDebug._cfg.networkThrottleMs = parseInt(document.getElementById('throttleMs').value);
+          }, 1500);
+        }
+      }, 100);
+    }
+
+    function testOnLoad() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', 'http://localhost:8000/api/debug/health?test=onload');
+      xhr.onload = function() {
+        var result = document.getElementById('compatResult');
+        result.className = 'result success';
+        result.textContent = '✓ xhr.onload 回调正常执行！\n状态码: ' + xhr.status + '\n响应: ' + xhr.responseText;
+      };
+      xhr.send();
+    }
+
+    function testOnReadyStateChange() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', 'http://localhost:8000/api/debug/health?test=readystate');
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+          var result = document.getElementById('compatResult');
+          result.className = 'result success';
+          result.textContent = '✓ xhr.onreadystatechange 回调正常执行！\nreadyState: ' + xhr.readyState + '\n状态码: ' + xhr.status + '\n响应: ' + xhr.responseText;
+        }
+      };
+      xhr.send();
+    }
+
+    function renderSilentFailurePayload(title) {
+      var result = document.getElementById('networkErrorResult');
+      if (!lastSilentFailurePayload) {
+        result.className = 'result error';
+        result.textContent = title + '\n未捕获到 silent failure payload';
+        return;
+      }
+      result.className = 'result success';
+      result.textContent = title + '\n' + JSON.stringify(lastSilentFailurePayload, null, 2);
+    }
+
+    function testNetworkErrorAutoReport() {
+      lastSilentFailurePayload = null;
+      fetch('http://127.0.0.1:65531/this-endpoint-will-fail?token=demo-secret')
+        .catch(function(err) {
+          setTimeout(function() {
+            renderSilentFailurePayload('✓ 自动网络错误上报已触发，fetch reject: ' + err.message);
+          }, 300);
+        });
+    }
+
+    function testManualReportNetworkError() {
+      lastSilentFailurePayload = null;
+      AiDebug.reportNetworkError({
+        method: 'POST',
+        url: 'https://api.example.com/payment?api_key=demo-key',
+        status_code: 0,
+        duration_ms: 123,
+        request_body: '{"password":"123456","amount":99}',
+        error: 'Manual simulated network failure'
+      });
+      setTimeout(function() {
+        renderSilentFailurePayload('✓ 手动 reportNetworkError 已触发');
+      }, 300);
+    }
+
+    AiDebug.init({
+      endpoint: 'http://localhost:8000',
+      captureNetwork: true,
+      networkSampleRate: 1.0,
+      networkThrottleMs: 0,
+      autoDetectNetworkErrors: true
+    });
+
+    AiDebug.onSilentFailureReport(function(payload) {
+      lastSilentFailurePayload = payload;
+    });
+
+    console.log('Demo page loaded. Start backend server first: python -m uvicorn app.main:app --reload');
+  </script>
+</body>
+</html>

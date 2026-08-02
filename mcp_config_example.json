@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "Lujo-MCP": {
+      "command": "python",
+      "args": ["-m", "app.mcp_server"],
+      "cwd": "/替换为你的项目绝对路径/Lujo-MCP",
+      "env": {
+        "PYTHONPATH": "."
+      }
+    }
+  }
+}
