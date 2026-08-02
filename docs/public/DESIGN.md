@@ -4,7 +4,7 @@
 > 配套文档：产品需求文档 `PRD.md`（回答"做什么/为什么"），本文档回答"怎么做"。
 > 版本：v0.3.0｜设计状态：✅ 已落地 / ⚠️ 已写待补完 / 🔲 设计草案（待实现）
 > 审阅视角：高级工程师 / 高级架构师
-> 本设计文档允许记录已设计但仍需环境启用或后续补完的能力。
+> 功能完成度与默认可交付状态请以内部交付矩阵文档（DELIVERY_MATRIX.md）为准；本设计文档允许记录已设计但仍需环境启用或后续补完的能力。
 >
 > **v0.3.1 更新**：PostgreSQL 集成完成、Dashboard 读取 PG、MCP Tools 读取 PG、LLM 分析端到端验证、集成测试补充（13 用例）
 >
@@ -15,8 +15,6 @@
 > **AI Debug Agent Phase 1 更新（2026-07-26）**：新增 `app/agent/` 模块（7 文件）——`BaseAgent` ABC + `AgentContext`/`AgentResult`/`AgentTrace` + `AgentStatus` 枚举、`RepairAgent`（复用 `analyzer._get_async_client`，独立重试/fallback + `_validate_repair_plan` 容错 JSON）、`RepairContextAssembler`（并发聚合 `analyze_async` + `retrieve_similar` + `get_recent_diff`，各失败静默降级）、`RepairQueue` + lifespan helper（结构对称 `analysis_queue.py`）、`Coordinator` 编排器（装配上下文 → 调度 Agent → 收集 trace）。新增 2 REST 端点 + 2 MCP 工具（工具数 15→17）。9 个 `agent_*` 配置项（`agent_enabled` 默认 False）。Phase 1 = 单 Agent + 多 Agent 协同框架预留，Phase 2 多 Agent DAG 为后续待办。测试基线：583 passed / 6 skipped / 0 failed
 >
 > **Dashboard 实时 SSE 推送更新（2026-07-30，`DASH-SSE-001`）**：新增 `app/api/dashboard_events.py`——`DashboardEventBus` 进程内广播总线（无 session 门槛，`subscribe()` 返回 `asyncio.Queue(maxsize=256)`，`publish()` 用 `loop.call_soon_threadsafe` 跨线程投递，队列满丢旧保最新，`close_all()` 优雅停机）；`dashboard.py` 新增 `GET /api/dashboard/stream` SSE 端点（15s 心跳 + close 终止 + `finally` unsubscribe 防泄漏）+ `invalidate_cache` 内挂广播钩子（广播失败静默降级，不影响主写入链路）；`dashboard.html` 前端 EventSource 集成（去抖 refresh + 10s 轮询兜底 + 断线 5s 重连）；`dashboard_sse_enabled=False` 默认关闭（零开销向后兼容）；鉴权复用 `?api_key=` query 降级。测试基线：654 passed / 6 skipped / 0 failed
->
-> **安全加固 + 线程安全修复（2026-08-01）**：修复 13 个缺陷（P0×3/P1×4/P2×6/P3×5）——RBAC 鉴权补全（`/metrics`、`/debug`、MCP 路由 `POST/GET/DELETE /mcp`）、`threading.Lock` 保护 `SSEHub._queues` 与 `DashboardEventBus._subs` 竞态条件、`app/mcp_routes.py` 重复 `json.loads` 优化、`analyzer.py` 锁设计改进、SSE 流空闲超时等。新增 `tests/unit/test_security_agent_severity.py`（7 用例）、`tests/unit/test_sse_hub.py`（7 用例）、`tests/unit/test_dashboard_events.py`（8 用例）。测试基线：672 passed / 6 skipped / 0 failed
 
 ---
 
@@ -391,22 +389,22 @@ LLM 输出契约：`{root_cause:str, impact:str, fix:str, confidence:"high|mediu
 
 | 能力 | 组件 | 说明 |
 | --- | --- | --- |
-| 脱敏 | [app/mcp/core/redaction.py](./app/mcp/core/redaction.py) | 存储边界统一脱敏，默认开启；**复合键名子串匹配 + 白名单** |
-| 统一存取 | [app/mcp/core/trace_repo.py](./app/mcp/core/trace_repo.py) | 在 TraceStorage + errors 之上实现 save_trace/get_trace/save_network_record/save_ui_event |
+| 脱敏 | [app/mcp/core/redaction.py](../app/mcp/core/redaction.py) | 存储边界统一脱敏，默认开启；**复合键名子串匹配 + 白名单** |
+| 统一存取 | [app/mcp/core/trace_repo.py](../app/mcp/core/trace_repo.py) | 在 TraceStorage + errors 之上实现 save_trace/get_trace/save_network_record/save_ui_event |
 | 网络采集 | `app/mcp/collectors/network.py` + `tools/network_api.py` | 解析/截断 + ingest_network/get_network_trace |
 | UI 采集 | `app/mcp/collectors/ui_event.py` | 解析/截断 |
-| Git 归因 | [app/mcp/core/git.py](./app/mcp/core/git.py) + `tools/git_api.py` | blame/diff，带超时+路径白名单 |
-| 静默失败 | `app/mcp/tools/silent_failure_api.py` + [api/ingest.py](./app/api/ingest.py) | 编排 ui/network + trace_kind |
+| Git 归因 | [app/mcp/core/git.py](../app/mcp/core/git.py) + `tools/git_api.py` | blame/diff，带超时+路径白名单 |
+| 静默失败 | `app/mcp/tools/silent_failure_api.py` + [api/ingest.py](../app/api/ingest.py) | 编排 ui/network + trace_kind |
 | 跨语言上报 | `app/mcp/tools/ingest_api.py` + `api/ingest.py` | ingest_error |
-| inbound 采集 | [app/middleware_network.py](./app/middleware_network.py) | 独立中间件，默认关闭，安全栈内层 |
-| 完整上下文 | [app/mcp/builders/context.py](./app/mcp/builders/context.py)::build_debug_context | 注入 code/git/network/ui/runtime/related_specs |
+| inbound 采集 | [app/middleware_network.py](../app/middleware_network.py) | 独立中间件，默认关闭，安全栈内层 |
+| 完整上下文 | [app/mcp/builders/context.py](../app/mcp/builders/context.py)::build_debug_context | 注入 code/git/network/ui/runtime/related_specs |
 | 规范驱动采集 | `app/mcp/collectors/spec.py` + `tools/spec_api.py` | 扫描/标签匹配/缓存/脱敏 + get_related_specs |
-| 指纹去重聚合 | [app/mcp/core/errors.py](./app/mcp/core/errors.py) | compute_fingerprint + occurrence_count，避免重复刷屏 |
-| 双传输注册 | [app/mcp/tools/__init__.py](./app/mcp/tools/__init__.py) + [app/mcp_server.py](./app/mcp_server.py) | HTTP / stdio 均为 17 个，统一注册表动态导出；**M5 版本协商（SUPPORTED_PROTOCOL_VERSIONS）** |
-| 代码定位 | [app/mcp/collectors/code_locator.py](./app/mcp/collectors/code_locator.py) | 源码片段 + vscode:// 链接，路径白名单防穿越 |
-| 静默失败检测 | [app/mcp/verifier/assert_engine.py](./app/mcp/verifier/assert_engine.py) | assert_behavior 纯函数，<1ms 判定 |
+| 指纹去重聚合 | [app/mcp/core/errors.py](../app/mcp/core/errors.py) | compute_fingerprint + occurrence_count，避免重复刷屏 |
+| 双传输注册 | [app/mcp/tools/__init__.py](../app/mcp/tools/__init__.py) + [app/mcp_server.py](../app/mcp_server.py) | HTTP / stdio 均为 17 个，统一注册表动态导出；**M5 版本协商（SUPPORTED_PROTOCOL_VERSIONS）** |
+| 代码定位 | [app/mcp/collectors/code_locator.py](../app/mcp/collectors/code_locator.py) | 源码片段 + vscode:// 链接，路径白名单防穿越 |
+| 静默失败检测 | [app/mcp/verifier/assert_engine.py](../app/mcp/verifier/assert_engine.py) | assert_behavior 纯函数，<1ms 判定 |
 | 前端自动化 | `app/verifier/ui_runner.py` + `tools/auto_test_api.py` | Playwright headless 遍历，可选依赖 |
-| 规范驱动闭环 | [app/mcp/verifier/spec_store.py](./app/mcp/verifier/spec_store.py) | spec CRUD + verify 工具 + spec_diffs 注入 |
+| 规范驱动闭环 | [app/mcp/verifier/spec_store.py](../app/mcp/verifier/spec_store.py) | spec CRUD + verify 工具 + spec_diffs 注入 |
 
 ---
 
@@ -725,7 +723,8 @@ sequenceDiagram
 ## 13. 数据流通与执行流程复核（2026-07-22 静态取证）
 
 > 本节为「数据从入口到出口」的端到端复核，与 §2/§4 的设计图互为印证；所有结论附 `文件:行`。
-> ✅ 其中 **P0 四项（LFI/SSRF/默认鉴权/工具超时）已于 2026-07-22 修复**；下文描述的是修复前的原始数据流与风险面。
+> 配套安全结论见内部安全审查文档（SECURITY_REVIEW.md）的「SEC-01~15」补充章。
+> ✅ 其中 **P0 四项（LFI/SSRF/默认鉴权/工具超时）已于 2026-07-22 修复**，详见内部审计报告（claude-audit-consolidated.md）；下文描述的是修复前的原始数据流与风险面。
 
 ### 13.1 两条入口（Ingress）
 
@@ -773,7 +772,8 @@ sequenceDiagram
 ## 14. 高并发设计评审（2026-07-22 高级架构师审查）
 
 > 本节为高级架构师逐行代码审查后的高并发专项评估，聚焦异步处理、缓存机制、限流策略和数据预防。
-> 参考架构映射见 §14.6（无人机巡检平台思路 → ai-debug-mcp 落地）。
+> 完整评分与优化路线图见内部代码审查文档（CODE_REVIEW.md）§企业级架构综合评审。
+> 参考架构映射见 §14.6（无人机巡检平台思路 → Lujo-MCP 落地）。
 
 ### 14.1 异步处理现状
 
@@ -2202,4 +2202,4 @@ refresh(); setInterval(refresh, 10000); initSSE();   // 轮询兜底 + SSE 叠�
 - `invalidate_cache` 广播钩子：触发广播、广播失败静默降级
 - 确定性测试：直接迭代 `StreamingResponse.body_iterator`，绕过 HTTP 层避免 async 死锁
 
-测试基线：672 passed / 6 skipped / 0 failed（583 → 654 → 672，新增 18 项 SSE + 22 项安全/线程安全修复）；ruff 0 违规。
+测试基线：654 passed / 6 skipped / 0 failed（583 → 654，新增 18 项）；ruff 0 违规。

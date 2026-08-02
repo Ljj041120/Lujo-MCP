@@ -24,7 +24,7 @@
 | v2.0 | 2026-07-07 | 团队 | 以真实痛点重构，新增 FR11–FR15 |
 | v3.0 | 2026-07-07 | 高级架构师 | **代码核实后修正实现状态**：标注自动捕获/宿主AI推理已落地；代码定位标记为"模块已实现但未接线+配置缺失"；静默失败/前端自动化确认为待开发；补充架构师痛点覆盖度矩阵与落地缺口 |
 | v4.0 | 2026-07-08 | 高级后端架构师 | **参考项目迁移完成（M1–M8）**：redaction/trace_repo/network/ui_event/git/silent_failure/ingest_error/build_debug_context 全部落地；6 个新工具双传输注册；FR13 采集链就绪（自动检测仍待建）；FR14/FR15 未纳入本次优先级 |
-| v4.2 | 2026-07-08 | 高级后端架构师 | **全量交付**：FR13 assert_engine+verify ✅、FR14 Playwright UI 遍历+verify_ui ✅、FR15 spec_store+闭环 ✅、浏览器 SDK TS ✅、多 LLM provider ✅、Web 控制台 Dashboard ✅。全量交付（测试状态以 [README.md](../../README.md) 项目状态表为准）。 |
+| v4.2 | 2026-07-08 | 高级后端架构师 | **全量交付**：FR13 assert_engine+verify ✅、FR14 Playwright UI 遍历+verify_ui ✅、FR15 spec_store+闭环 ✅、浏览器 SDK TS ✅、多 LLM provider ✅、Web 控制台 Dashboard ✅。全量交付（测试状态以 [README.md](../README.md) 项目状态表为准）。 |
 | v5.0 | 2026-07-24 | 高级架构师 | **Phase 5 数据层长期优化交付**：P3-1 数据分区（traces 表按月 RANGE 分区）、P3-2 归档策略（>N 天自动归档到 traces_archive）、P3-3 批量写入、P3-5 优雅降级、P3-8 熔断器、Phase 7 智能错误分析引擎。单元测试 369 passed / 6 skipped / 0 failed；ruff 0 违规。 |
 | v5.1 | 2026-07-25 | 高级架构师 | **增量能力同步**：Browser SDK V3/V6（网络错误自动标记、UI 静默失败自动检测）与指纹知识库基础能力（命中优先 + 自动沉淀）已落地；向量检索版 RAG 与 AI Debug Agent 仍为后续阶段。 |
 | v5.2 | 2026-07-25 | 高级架构师 | **三轨并行交付**：P3-6 异步分析队列（有界 `asyncio.Queue` + K 常驻消费协程 + `Semaphore` 对齐 RPM/TPM + lifespan drain）；Phase 7 向量检索 RAG（`VectorStore` ABC + `InProcess`/`Null` 实现 + Qdrant 留空插槽 + 工厂注册表）；AUDIT-2-13/14 RBAC + API Key 轮换（多 key 恒定时间比较 + 角色分级 + `require_role` 依赖门控）。零侵入 `analyzer.py` 与 `AuthMiddleware` 公共签名。 |
@@ -159,7 +159,7 @@
 
 ## 7. 功能需求（含真实实现状态）
 
-> 说明：本节描述产品需求与阶段性实现状态。
+> 说明：本节描述产品需求与阶段性实现状态；若与仓库中其他文档冲突，功能完成度以内部交付矩阵文档（DELIVERY_MATRIX.md）的代码实情判定为准。
 
 > 状态：✅ 已实现 / ⚠️ 已实现模块但未接线或配置缺失 / 🔲 待开发。优先级 P0/P1/P2。
 
@@ -333,7 +333,7 @@
   - 广播异常：`try/except` 静默吞没，不影响 trace/error 写入与缓存失效主链路。
   - 订阅者离线：`call_soon_threadsafe` 抛 `RuntimeError` 时 `safe_remove` 清理失效订阅。
   - 队列满：丢旧事件保最新，避免慢消费者阻塞广播。
-- **验收**：`dashboard_sse_enabled=False` 时行为与旧版完全一致（纯轮询）；启用后 `invalidate_cache` 触发时订阅客户端收到 `dashboard_changed` 事件并去抖刷新；15s 无事件收到心跳保活；`close_all` 后客户端正常终止；测试基线 672 passed / 6 skipped / 0 failed（新增 18 单测 SSE + 22 项安全/线程安全修复）。
+- **验收**：`dashboard_sse_enabled=False` 时行为与旧版完全一致（纯轮询）；启用后 `invalidate_cache` 触发时订阅客户端收到 `dashboard_changed` 事件并去抖刷新；15s 无事件收到心跳保活；`close_all` 后客户端正常终止；测试基线 654 passed / 6 skipped / 0 failed（新增 18 单测）。
 
 ---
 
@@ -572,7 +572,7 @@ HTTP 传输侧（`register_all_tools()` 注册表）与 stdio 传输共用同一
 | ~~P0~~ ✅ | ~~FR18 RBAC + API Key 轮换（AUDIT-2-13/14）~~ | ~~key_rotation.py + rbac.py + require_role~~ | 鉴权安全 |
 | ~~P1~~ ✅ | ~~FR19 AI Debug Agent Phase 1（自动修复）~~ | ~~app/agent/ 模块（BaseAgent ABC + RepairAgent + Coordinator + RepairQueue）+ 2 端点 + 2 MCP 工具~~ | 自动修复 |
 | P1 | FR12 增强 | `/api/debug/prompt` 文本端点 | P2（非 MCP 场景） |
-| ~~P2~~ ✅ | ~~AI Debug Agent Phase 2（多 Agent DAG）~~ | ~~在 `BaseAgent` ABC + `Coordinator` 框架上扩展 Git Agent / Test Agent / Security Agent 并行编排~~ | 自动修复增强 |
+| P2 | AI Debug Agent Phase 2（多 Agent DAG） | 在 `BaseAgent` ABC + `Coordinator` 框架上扩展 Git Agent / Test Agent / Security Agent 并行编排 | 自动修复增强 |
 | P2 | 多 LLM 厂商 / OpenTelemetry / Web 控制台 / 多租户 | 见 v1.0 | — |
 
 ---

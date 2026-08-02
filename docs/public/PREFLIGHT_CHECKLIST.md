@@ -1,7 +1,7 @@
 # 启动前检查清单 / Pre-flight Checklist
 
 **适用版本 / Applicable Version**: v0.3.0  
-**最后更新 / Last Updated**: 2026-08-01
+**最后更新 / Last Updated**: 2026-07-30
 
 ---
 
