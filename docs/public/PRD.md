@@ -30,8 +30,7 @@
 | v5.2 | 2026-07-25 | 高级架构师 | **三轨并行交付**：P3-6 异步分析队列（有界 `asyncio.Queue` + K 常驻消费协程 + `Semaphore` 对齐 RPM/TPM + lifespan drain）；Phase 7 向量检索 RAG（`VectorStore` ABC + `InProcess`/`Null` 实现 + Qdrant 留空插槽 + 工厂注册表）；AUDIT-2-13/14 RBAC + API Key 轮换（多 key 恒定时间比较 + 角色分级 + `require_role` 依赖门控）。零侵入 `analyzer.py` 与 `AuthMiddleware` 公共签名。 |
 | v5.3 | 2026-07-26 | 高级架构师 | **Qdrant 适配器 + L3 缓存预热交付**：Qdrant 向量检索适配器（`QdrantVectorStore`：OpenAI/智谱 Embeddings 语义召回 + `uuid5(fingerprint)` 幂等 upsert + 静默降级）；P3-7 L3 缓存预热（只写 L1 不刷新 L2 TTL）。向量检索 RAG 双后端（in-process + Qdrant）完整落地，AI Debug Agent 前置依赖就绪。单元测试 520 passed / 6 skipped / 0 failed。 |
 | v5.4 | 2026-07-26 | 高级架构师 | **AI Debug Agent Phase 1 交付**：新增 `app/agent/` 模块（7 文件）——`BaseAgent` ABC + `AgentContext`/`AgentResult`/`AgentTrace` + `AgentStatus` 枚举、`RepairAgent`（复用 `analyzer._get_async_client`，独立重试/fallback + `_validate_repair_plan` 容错 JSON）、`RepairContextAssembler`（并发聚合 `analyze_async` + `retrieve_similar` + `get_recent_diff`，各失败静默降级）、`RepairQueue` + lifespan helper、`Coordinator` 编排器（装配上下文 → 调度 Agent → 收集 trace）。新增 2 REST 端点（`POST /api/debug/repair/async` + `GET /api/debug/repair/result/{job_id}`）+ 2 MCP 工具（`repair_async` + `repair_result`，工具数 15→17）。新增 9 个 `agent_*` 配置项（`agent_enabled` 默认 False）。Phase 1 定位为单 Agent（`RepairAgent`）+ 多 Agent 协同框架（`BaseAgent` ABC 预留），Phase 2 多 Agent DAG 为后续待办。单元测试 583 passed / 6 skipped / 0 failed；ruff 0 违规。 |
-| v5.5 | 2026-07-30 | 高级架构师 | **Dashboard 实时 SSE 推送交付（`DASH-SSE-001`）**：新增 `app/api/dashboard_events.py`——`DashboardEventBus` 广播总线（无 session 门槛，跨线程 `call_soon_threadsafe` 投递，队列满丢旧保最新）；`dashboard.py` 新增 `GET /api/dashboard/stream` SSE 端点（15s 心跳 + close 事件终止）+ `invalidate_cache` 内挂广播钩子（广播失败静默降级，不影响主写入链路）；`dashboard.html` 前端 EventSource 集成（去抖 refresh + 10s 轮询兜底 + 断线 5s 重连）；`dashboard_sse_enabled=False` 默认关闭（向后兼容零开销）；鉴权复用 `?api_key=` query 降级（EventSource 无法设自定义 header）。新增 FR20 + 18 单测（测试基线 583→654→672 passed / 6 skipped / 0 failed）；ruff 0 违规。 |
-| v5.6 | 2026-08-03 | 架构委员会 | **架构委员会最终决策（v0.4.0 开发路线制定）**：经过项目代码审计、技术架构评审、产品战略分析、开发路线规划四轮评审，形成以下关键决策——(1) 项目当前阶段判定为 Beta 偏 Demo（代码完整度达 Beta 标准，但核心价值无法量化证明）；(2) v0.4.0 唯一核心目标为"让 Debug Context 价值可量化、可证明"，不做新功能堆砌；(3) 制定 17 个开发任务、5 个 Milestone 的详细执行计划（Quality System → Debug Case Schema → Fault Localization 2.0 → Agent Verify Loop → 全量回归）；(4) 明确 MCP 协议层、Storage 抽象层、Browser SDK 采集链、Agent 框架、安全中间件、配置系统为禁止大改的核心模块；(5) 设计 Debug Case 标准 Schema（Bug 现象 → 根因 → 修复方案 → 验证结果 → 元数据）与 Agent 闭环（Bug 出现 → Context 采集 → Fault Localization → Root Cause Analysis → Repair → Verify → Memory 沉淀）。详见 DESIGN.md §19、AI_RULES.md §八。 |
+| v5.5 | 2026-07-30 | 高级架构师 | **Dashboard 实时 SSE 推送交付（`DASH-SSE-001`）**：新增 `app/api/dashboard_events.py`——`DashboardEventBus` 广播总线（无 session 门槛，跨线程 `call_soon_threadsafe` 投递，队列满丢旧保最新）；`dashboard.py` 新增 `GET /api/dashboard/stream` SSE 端点（15s 心跳 + close 事件终止）+ `invalidate_cache` 内挂广播钩子（广播失败静默降级，不影响主写入链路）；`dashboard.html` 前端 EventSource 集成（去抖 refresh + 10s 轮询兜底 + 断线 5s 重连）；`dashboard_sse_enabled=False` 默认关闭（向后兼容零开销）；鉴权复用 `?api_key=` query 降级（EventSource 无法设自定义 header）。新增 FR20 + 18 单测（测试基线 583→654 passed / 6 skipped / 0 failed）；ruff 0 违规。 |
 
 ---
 
@@ -160,7 +159,7 @@
 
 ## 7. 功能需求（含真实实现状态）
 
-> 说明：本节描述产品需求与阶段性实现状态；若与仓库中其他文档冲突，功能完成度以内部交付矩阵文档（DELIVERY_MATRIX.md）的代码实情判定为准。
+> 说明：本节描述产品需求与阶段性实现状态；若与仓库中其他文档冲突，功能完成度以内部文档的代码实情判定为准。
 
 > 状态：✅ 已实现 / ⚠️ 已实现模块但未接线或配置缺失 / 🔲 待开发。优先级 P0/P1/P2。
 
@@ -560,44 +559,21 @@ HTTP 传输侧（`register_all_tools()` 注册表）与 stdio 传输共用同一
 
 ---
 
-## 12. 未来路线图
+## 12. 未来路线图（按痛点优先级重排）
 
-### 12.1 历史路线（已完成）
-
-| 优先级 | 阶段 | 方向 | 解决痛点 | 状态 |
-| --- | --- | --- | --- | --- |
-| P0 | FR11 代码定位 | 接线 `code_snippets` + `code_context_lines` 配置 | P1 | ✅ |
-| P0 | FR13 静默失败检测 | assert_engine + verify 工具 | P5/P6 | ✅ |
-| P0 | FR15 规范驱动闭环 | spec_store + verify 闭环 + spec_diffs | P4/P5/P6 | ✅ |
-| P1 | FR14 前端自动化 | Playwright ui_runner + verify_ui | P4 | ✅ |
-| P1 | FR16 异步分析队列 | analysis_queue.py + lifespan drain | 限流削峰 | ✅ |
-| P1 | FR17 向量检索 RAG | vector_store.py ABC + InProcess/Null + Qdrant | 召回增强 | ✅ |
-| P0 | FR18 RBAC + Key 轮换 | key_rotation.py + rbac.py + require_role | 鉴权安全 | ✅ |
-| P1 | FR19 AI Debug Agent Phase 1 | BaseAgent ABC + RepairAgent + Coordinator | 自动修复 | ✅ |
-| P1 | FR20 Dashboard SSE | DashboardEventBus + /api/dashboard/stream | 实时运维 | ✅ |
-
-### 12.2 v0.4.0 路线图（2026-08-03 架构委员会批准）
-
-**v0.4.0 唯一核心目标：让 Debug Context 价值可量化、可证明。**
-
-| 优先级 | Milestone | 任务 | 目标 | 预计工期 |
-| --- | --- | --- | --- | --- |
-| **P0** | M1 Quality Foundation | Quality System 核心框架（`app/quality/` 模块：ContextCompleteness + AnalysisConfidence + QualityReport + QualityScorer 规则引擎） | 每次分析结果附带质量报告（完整度 + 可信度） | 4-6 周 |
-| **P0** | M1 Quality Foundation | LLM 分析增强（SYSTEM_PROMPT 增加 `reasoning_chain` + `evidence_items`） | AI Agent 可看推理过程而非盲信结论 | 与上并行 |
-| **P0** | M2 Debug Memory | Debug Case 标准 Schema（`app/rag/schemas.py`：BugSymptom → RootCause → FixSolution → VerificationResult → CaseMetadata）+ 内置通用知识库（30 条种子知识） | 知识库标准化，新用户 5 分钟体验价值 | 3-4 周 |
-| **P1** | M2 Debug Memory | Dashboard 质量报告展示（trace 详情增加 Quality 卡片） | 用户可视化看到每次调试质量 | 1 周 |
-| **P1** | M3 Fault Localization | 函数级静态分析（`app/mcp/collectors/static_analyzer.py`：基于 Python `ast` 标准库，零依赖） | 从文件级提升到函数级定位（函数签名 + 调用链 + 可疑输入） | 3-4 周 |
-| **P2** | M4 Agent Loop | Agent Verify Loop（`app/agent/verify_agent.py` + `coordinator.py` 迭代修复 + 记忆沉淀） | 修复 → 审查 → 验证 → 记忆 完整闭环 | 3-4 周 |
-| **P2** | M5 Regression | 全量回归测试 + 文档更新 | 不退化，文档同步 | 2 周 |
-
-**v0.4.0 明确不做：**
-- ❌ 新增 MCP 工具（17 个已够用，先做深不做广）
-- ❌ 合并 PG 同步/异步双轨（风险太高，留给 v0.5.0）
-- ❌ 多语言 StaticAnalyzer（先用 Python 验证价值）
-- ❌ Dashboard 重写/美化
-- ❌ 告警/通知系统
-- ❌ SaaS 托管平台
-- ❌ 多项目采集隔离（v0.5.0 团队协作的前置条件）
+| 优先级 | 阶段 | 方向 | 解决痛点 |
+| --- | --- | --- | --- |
+| ~~P0 立即~~ ✅ | ~~补完 FR11~~ | ~~接线 `code_snippets` + 加 `code_context_lines` 配置~~ | P1 |
+| ~~P0~~ ✅ | ~~FR13 静默失败检测~~ | ~~assert_engine + verify 工具~~ | P5/P6 |
+| ~~P0~~ ✅ | ~~FR15 规范驱动闭环~~ | ~~spec_store + verify 闭环 + spec_diffs~~ | P4/P5/P6 |
+| ~~P1~~ ✅ | ~~FR14 前端自动化~~ | ~~Playwright ui_runner + verify_ui~~ | P4 |
+| ~~P1~~ ✅ | ~~FR16 异步分析队列（P3-6）~~ | ~~analysis_queue.py + lifespan drain~~ | 限流削峰 |
+| ~~P1~~ ✅ | ~~FR17 向量检索 RAG（Phase 7 增量）~~ | ~~vector_store.py ABC + InProcess/Null + Qdrant 插槽~~ | 召回增强 |
+| ~~P0~~ ✅ | ~~FR18 RBAC + API Key 轮换（AUDIT-2-13/14）~~ | ~~key_rotation.py + rbac.py + require_role~~ | 鉴权安全 |
+| ~~P1~~ ✅ | ~~FR19 AI Debug Agent Phase 1（自动修复）~~ | ~~app/agent/ 模块（BaseAgent ABC + RepairAgent + Coordinator + RepairQueue）+ 2 端点 + 2 MCP 工具~~ | 自动修复 |
+| P1 | FR12 增强 | `/api/debug/prompt` 文本端点 | P2（非 MCP 场景） |
+| P2 | AI Debug Agent Phase 2（多 Agent DAG） | 在 `BaseAgent` ABC + `Coordinator` 框架上扩展 Git Agent / Test Agent / Security Agent 并行编排 | 自动修复增强 |
+| P2 | 多 LLM 厂商 / OpenTelemetry / Web 控制台 / 多租户 | 见 v1.0 | — |
 
 ---
 
@@ -647,10 +623,6 @@ HTTP 传输侧（`register_all_tools()` 注册表）与 stdio 传输共用同一
 | 前端自动化 | Playwright 对 Canvas/SPA 兼容有限 | 先覆盖标准 DOM；支持外部 E2E 结果导入 |
 | 厂商锁定 | ~~仅 OpenAI~~ | 多 LLM provider 已支持（openai/zhipu/custom）|
 | ~~待确认~~ | ~~是否默认开启前端自动化~~ | `PLAYWRIGHT_ENABLED` 可选依赖，未安装不影响 |
-| **⚠️ 核心价值不可量化** | **Debug Context 质量无法量化证明。用户无法回答"用了 Lujo-MCP 的 AI Agent 比不用好多少"。这是 v0.4.0 要解决的核心问题。** | **v0.4.0 Quality System 提供质量评估基线（完整度 + 可信度 + 验证状态），详见 §12.2** |
-| **⚠️ 知识库冷启动** | **新部署实例零历史数据，Debug Memory 初始价值为零。L3 缓存预热只能回填 L1 不能解决冷启动。** | **v0.4.0 内置 30 条种子知识覆盖常见异常** |
-| **⚠️ 功能默认关闭** | **大量高级功能通过 feature flag 默认关闭（agent_enabled=False、vector_store_enabled=False 等），默认可用功能仅为基础追踪和上下文构建。** | **文档明确标注启用条件；v0.4.0 不改变默认值策略** |
-| PG 同步/异步双轨 | psycopg2 同步 + asyncpg 异步 feature flag 并存，代码路径翻倍，长期维护成本高 | 延后至 v0.5.0 处理，不在 v0.4.0 范围内 |
 
 ---
 
