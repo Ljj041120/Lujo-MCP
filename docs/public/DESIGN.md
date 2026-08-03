@@ -2202,4 +2202,180 @@ refresh(); setInterval(refresh, 10000); initSSE();   // 轮询兜底 + SSE 叠�
 - `invalidate_cache` 广播钩子：触发广播、广播失败静默降级
 - 确定性测试：直接迭代 `StreamingResponse.body_iterator`，绕过 HTTP 层避免 async 死锁
 
-测试基线：654 passed / 6 skipped / 0 failed（583 → 654，新增 18 项）；ruff 0 违规。
+测试基线：672 passed / 6 skipped / 0 failed（583 → 654 → 672，Dashboard SSE 18 项 + 安全加固 18 项）；ruff 0 违规。
+
+---
+
+## 19. v0.4.0 架构评审决策（2026-08-03 架构委员会）
+
+> 本节记录架构委员会对 v0.4.0 开发路线的最终决策，包括项目状态评估、核心设计决策、架构稳定性约束、新增模块设计规范。
+> 配套文档：PRD.md §12.2（v0.4.0 路线图）、AI_RULES.md §八（v0.4.0 开发约束）。
+
+### 19.1 项目当前状态评估
+
+| 维度 | 判定 | 依据 |
+| --- | --- | --- |
+| 代码完整度 | Beta | 8 个 Phase 全部落地，654 单元测试通过 |
+| 价值可证明性 | Demo | Debug Context 质量无法量化，无法回答"用了比不用好多少" |
+| 部署就绪度 | Beta | Docker Compose 一键部署，但大量功能需外部依赖 |
+| 综合判定 | **Beta 偏 Demo** | 代码完整度达 Beta 标准，但核心价值停留在 Demo 级别 |
+
+**v0.4.0 的核心任务：把"代码上的 Beta"变成"价值上的 Beta"。**
+
+### 19.2 核心设计决策
+
+#### 决策 1：v0.4.0 唯一核心目标
+
+**让 Debug Context 价值可量化、可证明。** 不做新功能堆砌，不重构已有模块。
+
+#### 决策 2：Quality System 设计
+
+在 `app/quality/` 新增质量评估模块，用规则引擎（非 ML 模型）对每次调试会话生成质量报告：
+
+| 评分维度 | 评估对象 | 评分规则 |
+| --- | --- | --- |
+| ContextCompleteness | 采集完整度 | 6 个采集器（stacktrace/runtime/network/ui/code/git）各贡献 1/6 权重 |
+| AnalysisConfidence | 分析可信度 | 知识库命中 → 85 分 / 向量召回 → 50+相似度×40 / 纯 LLM → 40+完整度×30 |
+| AgentVerification | 验证有效度 | verified → 100 分 / failed → 0 分 / pending → 50 分 |
+| QualityReport.overall_score | 综合评分 | 完整度×30% + 可信度×40% + 验证×30% |
+
+**设计原则：** 规则引擎（可解释 > 精确）、纯函数（无副作用）、评分失败静默降级为 null。
+
+#### 决策 3：Debug Case 标准 Schema
+
+知识库核心数据结构标准化为 `DebugCase`：
+
+```
+DebugCase
+├── [身份] case_id, fingerprint (SHA256(exc_type|top3_frames)[:16])
+├── [Bug 现象] BugSymptom
+│   ├── 确定性字段: exception_type, exception_message, top_frames → 指纹精确匹配
+│   └── 语义字段: symptom_description, category, language, tags → 向量检索
+├── [根因分析] RootCause
+│   ├── summary, explanation, reasoning_chain, evidence_items
+│   └── fault_location: FaultLocation (file, function, call_chain, function_signature, suspicious_inputs)
+├── [修复方案] FixSolution (summary, detail, code_diff, fix_type, affected_files, risk_level)
+├── [验证结果] VerificationResult (status, method, checks_passed, checks_total)
+└── [元数据] CaseMetadata (project_id, contributor, usage_count, quality_score, is_seed)
+```
+
+**关键设计：** `BugSymptom` 同时包含确定性字段（用于 `fingerprint` 精确匹配）和语义字段（`to_search_text()` 用于向量检索），一个 Schema 同时支持两种检索方式。
+
+**数据产生时机：** LLM 分析成功 → 自动写入；Agent 修复 + 验证通过 → 自动写入；开发者导入 → `import_cases()`；系统启动 → 30 条种子知识自动加载。
+
+**召回策略：** 精确指纹匹配（命中 → 85 分）→ 向量语义召回（命中 → 50+相似度×40）→ 纯 LLM 推理（40+完整度×30）。
+
+#### 决策 4：Fault Localization 2.0
+
+从文件级定位提升到函数级定位，新增 `app/mcp/collectors/static_analyzer.py`：
+
+- 基于 Python `ast` 标准库（零额外依赖）
+- 仅分析堆栈帧中涉及的函数（不分析整个项目）
+- 提取：参数名、类型注解、返回值类型、装饰器、文档字符串、内部调用、复杂度提示
+- 调用链追溯（最多 5 层深度）
+- 可疑输入推断（如"参数默认值为 None 但返回类型不接受 None"）
+- 分析失败静默降级
+
+#### 决策 5：Agent Verify Loop
+
+在现有 Agent DAG 基础上增加迭代修复 + 验证 + 记忆沉淀闭环：
+
+```
+RepairAgent（初次生成）
+    ↓
+并行审查（GitAgent | TestAgent | SecurityAgent）
+    ↓
+审查通过？→ 不通过 → 反馈给 RepairAgent 重新生成（最多 3 轮）
+    ↓ 通过
+VerifyAgent（复用 verifier 断言引擎）
+    ↓
+Memory Update（验证通过后自动写入 DebugCase）
+```
+
+**新增模块：** `app/agent/verify_agent.py`（遵循 BaseAgent ABC 契约）
+**修改模块：** `app/agent/coordinator.py`（`_run_iterative_dag` + `_update_memory`）、`app/agent/dag.py`（增加 verify 节点）
+**Feature Flag：** `agent_iterative_repair_enabled`（默认 False，向后兼容）
+
+### 19.3 架构稳定性约束
+
+**以下模块在 v0.4.0 中禁止大改：**
+
+| 模块 | 路径 | 禁止原因 |
+| --- | --- | --- |
+| MCP 协议层 | `app/mcp/protocol/` | 17 个工具双传输注册，JSON-RPC 2.0 分发逻辑。基础协议层，变更影响所有下游 |
+| Storage 抽象层 | `app/mcp/core/storage/` | TraceStorage/SessionStorage ABC 接口稳定。PG 同步/异步双轨延后至 v0.5.0 |
+| Browser SDK 采集链 | `browser-sdk/ai-debug.js` | 2000+ 行原生 JS，V2-V6 迭代积累。任何改动可能引入采集覆盖率退化 |
+| Agent 框架 | `app/agent/base.py` | BaseAgent ABC + AgentContext/AgentResult/AgentTrace 是多 Agent 契约基础。v0.4.0 只增加新 Agent，不修改契约 |
+| 安全中间件 | `app/middleware.py` | 中间件栈顺序严格（CORS → Trace → SecurityHeaders → RateLimit → MaxBodySize → Auth → NetworkCapture），顺序错误可能导致安全漏洞 |
+| 配置系统 | `app/config.py` | 70+ 配置项全局单例。v0.4.0 只新增配置项，不修改已有配置项签名和默认值 |
+
+### 19.4 新增模块设计规范
+
+| 新增模块 | 位置 | 设计约束 |
+| --- | --- | --- |
+| Quality System | `app/quality/` | 纯函数评分，无副作用；feature flag `quality_scoring_enabled` 控制 |
+| Debug Case Schema | `app/rag/schemas.py` | 向后兼容旧格式 dict（`migrate_legacy_entry` 迁移函数） |
+| 种子知识库 | `app/rag/seed_knowledge.py` | 30 条种子知识，启动时自动加载，加载失败静默降级 |
+| StaticAnalyzer | `app/mcp/collectors/static_analyzer.py` | 零额外依赖（仅 `ast` 标准库），分析失败返回 None |
+| VerifyAgent | `app/agent/verify_agent.py` | 遵循 BaseAgent ABC 契约，复用 `app/mcp/verifier/` 断言引擎 |
+
+### 19.5 v0.4.0 开发任务总览（17 个任务、5 个 Milestone）
+
+| Milestone | 任务数 | 预计工期 | 交付物 |
+| --- | --- | --- | --- |
+| M1-quality-foundation | 6 | 4-6 周 | Quality System 核心 + LLM 分析增强 + Dashboard 集成 |
+| M2-debug-case-schema | 5 | 3-4 周 | DebugCase Schema + 种子知识库 + 知识库导入/导出 |
+| M3-fault-localization | 2 | 3-4 周 | StaticAnalyzer + context_assembler 集成 |
+| M4-agent-verify-loop | 4 | 3-4 周 | VerifyAgent + 迭代修复 + 记忆沉淀 |
+| M5-full-regression | 2 | 2 周 | 全量回归测试 + 文档更新 |
+
+**总计：27 个 Issue，预计 18-20 周。**
+
+### 19.6 Agent 闭环数据流
+
+```
+Step 1: Bug 出现
+    输入: Browser SDK 上报 / 服务端异常捕获
+    输出: 原始异常数据（exception_type, message, stacktrace, runtime_snapshot, network_events, ui_events）
+    模块: browser-sdk/ai-debug.js → app/api/ingest.py → app/mcp/collectors/
+
+Step 2: Context 采集
+    输入: 原始异常数据
+    输出: 结构化 Debug Context（stacktrace + runtime + network + code + git + static_analysis）
+    模块: app/agent/context_assembler.py → app/quality/scorer.py（注入 completeness）
+
+Step 3: Fault Localization
+    输入: 结构化 Debug Context
+    输出: 故障定位（文件 + 函数 + 行号 + 调用链 + 函数签名 + 可疑输入）
+    模块: app/mcp/collectors/static_analyzer.py + stacktrace.py + code_locator.py
+
+Step 4: Root Cause Analysis
+    输入: Debug Context（含 fault localization）
+    输出: 根因分析（summary + explanation + reasoning_chain + evidence_items + confidence + source）
+    模块: app/llm/analyzer.py → app/rag/knowledge_base.py（指纹匹配）→ app/rag/vector_store.py（向量召回）
+
+Step 5: Repair
+    输入: Debug Context + 根因分析结果
+    输出: 修复方案（summary + detail + code_diff + fix_type + affected_files + risk_level）
+    模块: app/agent/repair_agent.py → app/agent/coordinator.py
+
+Step 6: Verify
+    输入: 修复方案 + 规范/断言
+    输出: 验证结果（status: verified/failed + method + checks_passed/checks_total）
+    模块: app/agent/verify_agent.py → app/mcp/verifier/assert_engine.py
+
+Step 7: Memory 沉淀
+    输入: 完整 DebugCase（Bug 现象 + 根因 + 修复 + 验证）
+    输出: 知识库更新（usage_count+1, last_hit_at 更新 或 新建条目）
+    模块: app/agent/coordinator.py（_update_memory）→ app/rag/knowledge_base.py（upsert）→ app/rag/vector_store.py（add）
+```
+
+### 19.7 与同类产品的关系定位
+
+| 产品 | 关系 | 说明 |
+| --- | --- | --- |
+| Sentry | 互补 | Sentry 做"监控告警"（面向人类），Lujo-MCP 做"AI 辅助调试"（面向 AI Agent） |
+| Cursor Agent / Claude Code | 渠道合作 | Lujo-MCP 通过 MCP 协议为 AI 编程助手提供运行时调试数据 |
+| SWE-Agent | 上下游 | SWE-Agent 是"修 Bug 的"，Lujo-MCP 是"描述 Bug 的" |
+| LangSmith | 品类不同 | LangSmith 关注 LLM 应用质量，Lujo-MCP 关注被 LLM 辅助的软件质量 |
+| Datadog | 无关 | Datadog 面向运维团队，Lujo-MCP 面向 AI 辅助开发者 |

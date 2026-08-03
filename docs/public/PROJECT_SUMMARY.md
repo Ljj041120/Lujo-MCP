@@ -158,7 +158,7 @@
 - ✅ scripts/ 目录（run_tests.sh / lint.sh / init_db.sh）
 - ✅ migrations/ 目录（6 个 SQL 文件）
 - ✅ GitHub Actions CI
-- ✅ 测试基线：以 `pytest` 实际执行结果为准；当前 **654 passed / 6 skipped / 0 failed**（含 AI Debug Agent Phase 1 新增 63 项 + Phase 2 新增 53 项 + Dashboard SSE 18 项）
+- ✅ 测试基线：以 `pytest` 实际执行结果为准；当前 **672 passed / 6 skipped / 0 failed**（含 AI Debug Agent Phase 1 新增 63 项 + Phase 2 新增 53 项 + Dashboard SSE 18 项 + 安全加固 18 项）
 
 ### v0.3.0 Release Audit 收口 ✅
 
@@ -179,7 +179,23 @@
 
 ## 5. 当前开发阶段
 
-**当前阶段**：核心能力已成型；"真实完成度收口 + MCP HTTP 流式闭环 + 稳定性落地验证"已完成；Browser SDK V3-V6 + 指纹知识库 + 向量检索版 RAG（in-process + Qdrant 语义召回）+ AI Debug Agent Phase 1（单 Agent `RepairAgent`）+ Phase 2（多 Agent DAG：`GitAgent` + `TestAgent` + `SecurityAgent` 编排）均已落地，当前进入 Browser SDK 压缩 e2e 联调与 Docker 容器化复现阶段
+**当前阶段**：v0.3.0 核心能力已成型；"真实完成度收口 + MCP HTTP 流式闭环 + 稳定性落地验证"已完成；Browser SDK V3-V6 + 指纹知识库 + 向量检索版 RAG（in-process + Qdrant 语义召回）+ AI Debug Agent Phase 1（单 Agent `RepairAgent`）+ Phase 2（多 Agent DAG：`GitAgent` + `TestAgent` + `SecurityAgent` 编排）+ Dashboard 实时 SSE 推送均已落地。
+
+**下一阶段：v0.4.0（2026-08-03 架构委员会批准）**
+
+**v0.4.0 唯一核心目标：让 Debug Context 价值可量化、可证明。** 不做新功能堆砌，不重构已有模块。
+
+| Milestone | 任务 | 预计工期 |
+| --- | --- | --- |
+| M1-quality-foundation | Quality System 核心框架 + LLM 分析增强（reasoning_chain + evidence_items）+ Dashboard 质量报告展示 | 4-6 周 |
+| M2-debug-case-schema | Debug Case 标准 Schema + 内置 30 条种子知识 + 知识库导入/导出 | 3-4 周 |
+| M3-fault-localization | 函数级静态分析（基于 Python `ast` 标准库，零依赖） | 3-4 周 |
+| M4-agent-verify-loop | Agent Verify Loop（迭代修复 + 验证 + 记忆沉淀） | 3-4 周 |
+| M5-full-regression | 全量回归测试 + 文档更新 | 2 周 |
+
+**总计：27 个 Issue，预计 18-20 周。** 详见 DESIGN.md §19、PRD.md §12.2。
+
+**v0.4.0 明确不做：** 新增 MCP 工具、合并 PG 同步/异步双轨、多语言 StaticAnalyzer、Dashboard 重写/美化、告警/通知系统、SaaS 托管平台、多项目采集隔离。
 
 **已完成**：
 - Phase 0：项目标准化 ✅
@@ -199,7 +215,7 @@
 - AI Debug Agent Phase 2：多 Agent DAG（`GitAgent` + `TestAgent` + `SecurityAgent` 编排，`AGENT-002`）✅（2026-07-30）
 - Dashboard 实时 SSE 推送（`DASH-SSE-001`）：`DashboardEventBus` 广播总线 + `GET /api/dashboard/stream` SSE 端点 + `invalidate_cache` 广播钩子 + 前端 EventSource（去抖 refresh + 轮询兜底 + 断线重连）✅（2026-07-30）
 
-**测试提示**：全仓测试基线请以仓库内最新 `pytest` 实际执行结果为准；当前 **654 passed / 6 skipped / 0 failed**（含 AI Debug Agent Phase 1 新增 63 项 + Phase 2 新增 53 项 + Dashboard SSE 18 项）。
+**测试提示**：全仓测试基线请以仓库内最新 `pytest` 实际执行结果为准；当前 **672 passed / 6 skipped / 0 failed**（含 AI Debug Agent Phase 1 新增 63 项 + Phase 2 新增 53 项 + Dashboard SSE 18 项 + 安全加固 18 项）。
 
 **当前优先级**（详见内部路线图 ROADMAP.md 与开发计划 DEV_PLAN.md，均为内部文档）：
 
@@ -229,6 +245,19 @@
 | 安全中间件 | [app/middleware.py](../app/middleware.py) | fail-closed 安全栈 |
 | 全局异常处理 | [app/error_handlers.py](../app/error_handlers.py) | 异常兜底 |
 | 可观测性 | [app/observability.py](../app/observability.py) | 监控指标 |
+
+### v0.4.0 架构稳定性约束（2026-08-03 架构委员会）
+
+**以下模块在 v0.4.0 中禁止大改：**
+
+| 模块 | 路径 | 禁止原因 |
+| --- | --- | --- |
+| **MCP 协议层** | `app/mcp/protocol/` | 17 个工具双传输注册，JSON-RPC 2.0 分发逻辑。基础协议层，变更影响所有下游 |
+| **Storage 抽象层** | `app/mcp/core/storage/` | TraceStorage/SessionStorage ABC 接口稳定。PG 同步/异步双轨延后至 v0.5.0 |
+| **Browser SDK 采集链** | `browser-sdk/ai-debug.js` | 2000+ 行原生 JS，V2-V6 迭代积累。任何改动可能引入采集覆盖率退化 |
+| **Agent 框架** | `app/agent/base.py` | BaseAgent ABC + AgentContext/AgentResult/AgentTrace 是多 Agent 契约基础。v0.4.0 只增加新 Agent 实现，不修改契约 |
+| **安全中间件** | `app/middleware.py` | 中间件栈顺序严格（CORS → Trace → SecurityHeaders → RateLimit → MaxBodySize → Auth → NetworkCapture），顺序错误可能导致安全漏洞 |
+| **配置系统** | `app/config.py` | 70+ 配置项全局单例。v0.4.0 只新增配置项，不修改已有配置项签名和默认值 |
 
 ### 禁止事项
 
