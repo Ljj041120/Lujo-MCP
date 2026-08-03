@@ -197,6 +197,31 @@
   .loading::after { content: '...'; animation: dots 1.5s steps(4, end) infinite; }
   @keyframes dots { 0%, 20% { content: ''; } 40% { content: '.'; } 60% { content: '..'; } 80%, 100% { content: '...'; } }
 
+  /* ── v0.4.0: Quality Report ── */
+  .quality-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-top: 8px; }
+  .quality-score-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .quality-score-row .big { font-size: 24px; font-weight: bold; }
+  .quality-score-bar { flex: 1; height: 8px; background: var(--border-light); border-radius: 4px; overflow: hidden; }
+  .quality-score-bar .fill { height: 100%; border-radius: 4px; transition: width .3s; }
+  .quality-score-high { color: var(--accent-green); } .quality-score-high .fill { background: var(--accent-green); }
+  .quality-score-mid { color: var(--accent-yellow); } .quality-score-mid .fill { background: var(--accent-yellow); }
+  .quality-score-low { color: var(--accent-red); } .quality-score-low .fill { background: var(--accent-red); }
+  .quality-formula { font-size: 11px; color: var(--text-secondary); margin-left: 8px; }
+  .quality-dim-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 8px; }
+  .quality-dim { display: flex; justify-content: space-between; font-size: 11px; padding: 4px 8px; background: var(--bg-tertiary); border-radius: 4px; }
+  .quality-dim .name { color: var(--text-primary); }
+  .quality-dim .score { font-weight: bold; }
+  .quality-dim.missing { opacity: 0.5; }
+  .quality-dim.missing .score { color: var(--accent-red); }
+  .quality-evidence-list { font-size: 11px; margin-top: 6px; }
+  .quality-evidence-item { padding: 4px 8px; background: var(--bg-tertiary); border-radius: 4px; margin-bottom: 4px; display: flex; gap: 6px; }
+  .quality-evidence-item .rel { font-size: 10px; padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
+  .quality-evidence-item .rel-high { background: #f8514940; color: var(--accent-red); }
+  .quality-evidence-item .rel-medium { background: #d2991d40; color: var(--accent-yellow); }
+  .quality-evidence-item .rel-low { background: #3fb95040; color: var(--accent-green); }
+  .quality-suggestions { font-size: 11px; margin-top: 8px; }
+  .quality-suggestion { padding: 4px 8px; background: #d2991d20; border-left: 2px solid var(--accent-yellow); margin-bottom: 4px; color: var(--accent-yellow); }
+
   /* ── Error State ── */
   .error-state { color: var(--accent-red); text-align: center; padding: 20px; font-size: 13px; }
 
@@ -354,6 +379,11 @@
       const t = await fetchJSON('/api/dashboard/trace/' + encodeURIComponent(tid));
       let html = '';
 
+      // v0.4.0: Quality Report（综合评分卡片，放在最前面）
+      if (t.quality_report) {
+        html += renderQualityCard(t.quality_report);
+      }
+
       if (t.exception) {
         html += '<div class="detail-section"><div class="label">Exception</div>';
         html += `<div class="value">${esc(t.exception.type)}: ${esc(t.exception.message)}</div>`;
@@ -409,6 +439,85 @@
     } catch(e) {
       detail.innerHTML = '<div class="error-state">⚠ Failed to load trace detail</div>';
     }
+  }
+
+  // ── v0.4.0: Quality Report 渲染 ──
+  const DIM_LABELS = {
+    trace: '异常堆栈', runtime: '运行时', code_snippet: '源码片段',
+    git_context: 'Git 归因', network: '网络', ui_event: 'UI 事件',
+    spec: '规范', knowledge_base: '知识库', llm_analysis: 'LLM 分析'
+  };
+
+  function scoreClass(s) {
+    if (s >= 0.7) return 'quality-score-high';
+    if (s >= 0.3) return 'quality-score-mid';
+    return 'quality-score-low';
+  }
+
+  function renderQualityCard(qr) {
+    const comp = qr.context_completeness || {};
+    const conf = qr.analysis_confidence || {};
+    const overall = qr.overall_score || 0;
+    const compScore = comp.overall_score || 0;
+    const confScore = conf.overall_score || 0;
+    const cls = scoreClass(overall);
+    const dims = comp.dimensions || {};
+    const evidence = qr.evidence_items || [];
+    const suggestions = qr.suggestions || [];
+
+    let html = '<div class="detail-section"><div class="label">Quality Report (v0.4.0)</div>';
+    html += '<div class="quality-card">';
+
+    // 综合评分
+    html += `<div class="quality-score-row ${cls}">`;
+    html += `<div class="big">${overall.toFixed(2)}</div>`;
+    html += `<div class="quality-score-bar"><div class="fill" style="width:${(overall*100).toFixed(0)}%"></div></div>`;
+    html += `<div class="quality-formula">= ${compScore.toFixed(2)} × ${confScore.toFixed(2)}</div>`;
+    html += '</div>';
+
+    // 维度评分网格
+    if (Object.keys(dims).length) {
+      html += '<div class="quality-dim-grid">';
+      for (const [key, ds] of Object.entries(dims)) {
+        const label = DIM_LABELS[key] || key;
+        const missing = !ds.present;
+        const colorCls = ds.score >= 0.7 ? 'quality-score-high' : (ds.score >= 0.3 ? 'quality-score-mid' : 'quality-score-low');
+        html += `<div class="quality-dim ${missing ? 'missing' : ''}">`;
+        html += `<span class="name">${esc(label)}</span>`;
+        html += `<span class="score ${colorCls}" style="color:inherit">${ds.score.toFixed(2)}</span>`;
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // 证据摘要（最多 5 条）
+    if (evidence.length) {
+      html += `<div class="quality-evidence-list">`;
+      html += `<div style="color:var(--text-secondary);margin-bottom:4px">证据 ${evidence.length} 条（高相关 ${conf.high_relevance_count || 0}）</div>`;
+      evidence.slice(0, 5).forEach(e => {
+        const relCls = e.relevance === 'high' ? 'rel-high' : (e.relevance === 'medium' ? 'rel-medium' : 'rel-low');
+        html += `<div class="quality-evidence-item">`;
+        html += `<span class="rel ${relCls}">${esc(e.relevance)}</span>`;
+        html += `<span>[${esc(e.type)}] ${esc((e.description||'').substring(0, 80))}</span>`;
+        html += `</div>`;
+      });
+      if (evidence.length > 5) {
+        html += `<div style="color:var(--text-muted);font-style:italic;padding:2px 8px">... 还有 ${evidence.length - 5} 条</div>`;
+      }
+      html += '</div>';
+    }
+
+    // 改进建议
+    if (suggestions.length) {
+      html += '<div class="quality-suggestions">';
+      suggestions.forEach(s => {
+        html += `<div class="quality-suggestion">💡 ${esc(s)}</div>`;
+      });
+      html += '</div>';
+    }
+
+    html += '</div></div>';
+    return html;
   }
 
   // ── Refresh ──
