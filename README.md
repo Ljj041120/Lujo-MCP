@@ -143,7 +143,7 @@ LLM_PROVIDER=zhipu           # openai | zhipu | custom（智谱免 VPN）
 
 ```bash
 curl http://localhost:8000/
-# → {"status":"ok","service":"Lujo-MCP","version":"0.3.0"}
+# → {"status":"ok","service":"Lujo-MCP","version":"0.4.0"}
 ```
 
 ## Demo 演示流程
@@ -167,11 +167,11 @@ curl http://localhost:8000/
 | 指标 | 状态 |
 |------|------|
 | MCP 工具数 | HTTP 17 / stdio 17（新增 `repair_async` / `repair_result`，FR19） |
-| 测试基线 | 单元 `654 passed / 6 skipped / 0 failed`（含 AI Debug Agent Phase 1 63 项 + Phase 2 53 项 + Dashboard SSE 18 项 + Qdrant 适配器 23 项 + L3 预热 12 项 + 三轨并行 104 项） |
+| 测试基线 | 单元 `764 passed / 6 skipped / 0 failed`（含 AI Debug Agent Phase 1 63 项 + Phase 2 53 项 + Dashboard SSE 18 项 + Quality System 86 项 + Verify Loop 38 项 + Dashboard 质量报告 6 项） |
 | 存储后端 | memory 默认可用；PostgreSQL / asyncpg 需依赖外部数据库环境 |
 | 稳定性能力 | 分区、归档、Redis L2、L3 缓存预热、熔断器、OTel、异步分析削峰队列均有真实代码，但需按环境启用并单独验证 |
 | 安全能力 | fail-closed 鉴权 + 多 key 恒定时间比较轮换 + RBAC 角色分级（admin/developer/viewer）+ LFI/SSRF 防护 |
-| 当前阶段 | Phase 0-6 全部完成；Phase 7 智能化（指纹知识库 + 向量检索 RAG in-process + Qdrant 语义召回 + AI Debug Agent Phase 1 单 Agent + Phase 2 多 Agent DAG）+ Phase 8 实时观测增强（Dashboard 实时 SSE 推送 `DASH-SSE-001`）均已落地；下一步为 Browser SDK 压缩 e2e 联调、Docker 容器化复现实验 |
+| 当前阶段 | v0.4.0 M1-M4 全部完成（Quality System + Debug Case Schema + Fault Localization 2.0 + Agent Verify Loop）；Phase 0-6 + Phase 7 智能化 + Phase 8 实时观测增强均已落地；下一步为 M5 全量回归测试 |
 | 权威口径 | 项目功能状态与启用验证以内部文档为准 |
 | 安全审查 | 安全加固代码已落地，实际启用边界与前提条件以运行环境配置为准 |
 

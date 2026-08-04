@@ -2,7 +2,7 @@
 
 > 本文档描述 Lujo-MCP 的**实现设计**：系统架构、模块职责、关键流程、数据模型、接口契约、设计决策与待设计项。
 > 配套文档：产品需求文档 `PRD.md`（回答"做什么/为什么"），本文档回答"怎么做"。
-> 版本：v0.3.0｜设计状态：✅ 已落地 / ⚠️ 已写待补完 / 🔲 设计草案（待实现）
+> 版本：v0.4.0｜设计状态：✅ 已落地 / ⚠️ 已写待补完 / 🔲 设计草案（待实现）
 > 审阅视角：高级工程师 / 高级架构师
 > 功能完成度与默认可交付状态以仓库代码实情为准；本设计文档允许记录已设计但仍需环境启用或后续补完的能力。
 >
@@ -15,6 +15,8 @@
 > **AI Debug Agent Phase 1 更新（2026-07-26）**：新增 `app/agent/` 模块（7 文件）——`BaseAgent` ABC + `AgentContext`/`AgentResult`/`AgentTrace` + `AgentStatus` 枚举、`RepairAgent`（复用 `analyzer._get_async_client`，独立重试/fallback + `_validate_repair_plan` 容错 JSON）、`RepairContextAssembler`（并发聚合 `analyze_async` + `retrieve_similar` + `get_recent_diff`，各失败静默降级）、`RepairQueue` + lifespan helper（结构对称 `analysis_queue.py`）、`Coordinator` 编排器（装配上下文 → 调度 Agent → 收集 trace）。新增 2 REST 端点 + 2 MCP 工具（工具数 15→17）。9 个 `agent_*` 配置项（`agent_enabled` 默认 False）。Phase 1 = 单 Agent + 多 Agent 协同框架预留，Phase 2 多 Agent DAG 为后续待办。测试基线：583 passed / 6 skipped / 0 failed
 >
 > **Dashboard 实时 SSE 推送更新（2026-07-30，`DASH-SSE-001`）**：新增 `app/api/dashboard_events.py`——`DashboardEventBus` 进程内广播总线（无 session 门槛，`subscribe()` 返回 `asyncio.Queue(maxsize=256)`，`publish()` 用 `loop.call_soon_threadsafe` 跨线程投递，队列满丢旧保最新，`close_all()` 优雅停机）；`dashboard.py` 新增 `GET /api/dashboard/stream` SSE 端点（15s 心跳 + close 终止 + `finally` unsubscribe 防泄漏）+ `invalidate_cache` 内挂广播钩子（广播失败静默降级，不影响主写入链路）；`dashboard.html` 前端 EventSource 集成（去抖 refresh + 10s 轮询兜底 + 断线 5s 重连）；`dashboard_sse_enabled=False` 默认关闭（零开销向后兼容）；鉴权复用 `?api_key=` query 降级。测试基线：654 passed / 6 skipped / 0 failed
+>
+> **v0.4.0 Quality System + Agent Verify Loop 更新（2026-08-04）**：M1-M4 全部交付——(1) `app/quality/` 模块（`QualityScorer` 9 维度加权评分 + 证据提取 + 可信度评分 + 改进建议）；(2) `app/rag/debug_case.py` 新增 `case_confidence`/`verify_count` + `compute_type_fingerprint` + `normalize_message_for_similarity`；`KnowledgeBaseStore` 三级 fallback 匹配 + KB↔向量索引双写同步；(3) `StaticAnalyzer` 增强（无堆栈场景 `analyze_source_code`/`analyze_handler`）+ `URLResolver`（HTTP 方法+路径反查 FastAPI 路由表）；(4) Agent Verify Loop（`VerifyRecord`/`IterationResult`/`LoopState` + Coordinator 三层开关调度 + 四级判定 + KB 写回 `verify_count`/`case_confidence`）。详见 §19。测试基线：764 passed / 6 skipped / 0 failed
 
 ---
 
