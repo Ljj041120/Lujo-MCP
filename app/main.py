@@ -168,6 +168,17 @@ async def lifespan(app: FastAPI):
         from app.llm.analysis_queue import start_analysis_queue
         await start_analysis_queue()
 
+    # ── v0.4.0 M2：启动期加载种子知识到 KnowledgeBaseStore ──
+    # merge 模式：已存在的 fingerprint 跳过，避免覆盖用户分析沉淀
+    if settings.kb_seed_autoload_enabled:
+        from app.rag.knowledge_base import load_seed_cases
+        from app.rag.seed_data import SEED_CASES, SEED_CASE_COUNT
+        seed_stats = load_seed_cases(SEED_CASES)
+        logger.info(
+            "Knowledge base seed loaded (startup): expected=%d stats=%s",
+            SEED_CASE_COUNT, seed_stats,
+        )
+
     # ── P3-7 L3 缓存预热：启动期一次性回填 L1 + 启动定时任务 ──
     if settings.llm_cache_prewarm_enabled:
         from app.llm.cache_prewarm import (

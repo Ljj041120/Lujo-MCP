@@ -142,7 +142,7 @@
 
   AiDebug.init({
     endpoint: "http://localhost:8000",
-    apiKey: "test_secret_key_456",
+    apiKey: localStorage.getItem("mcp_api_key") || "YOUR_API_KEY_HERE",
     captureNetwork: true,
     captureUI: true,
     autoDetectNetworkErrors: true,

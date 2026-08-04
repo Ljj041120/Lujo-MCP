@@ -17,6 +17,19 @@ env/
 .env.*
 !.env.example
 
+# 密钥 / 证书文件
+*.key
+*.pem
+*.p12
+*.pfx
+*.keystore
+credentials*
+secrets*
+id_rsa*
+*.ppk
+.aws/
+.gcloud/
+
 # 测试与缓存
 .pytest_cache/
 .mypy_cache/
