@@ -20,10 +20,11 @@ class Settings(BaseSettings):
     )
 
     # ── LLM ──
-    # provider: "openai" | "zhipu" | "custom"
-    # openai → 默认 https://api.openai.com/v1
-    # zhipu  → 自动设置 base_url = https://open.bigmodel.cn/api/paas/v4/，model 推荐 glm-4-flash
-    # custom → 需自行填写 llm_base_url
+    # provider: "openai" | "deepseek" | "zhipu" | "custom"
+    # openai   → 默认 https://api.openai.com/v1，模型 gpt-4o / gpt-4o-mini
+    # deepseek → 自动设置 base_url = https://api.deepseek.com/v1，模型 deepseek-v4-flash / deepseek-v4-pro
+    # zhipu    → 自动设置 base_url = https://open.bigmodel.cn/api/paas/v4/，模型 glm-5.2 / glm-4.5 / glm-4-flash
+    # custom   → 需自行填写 llm_base_url（任意 OpenAI 兼容端点，如自有网关/中转）
     llm_provider: str = "openai"
     openai_api_key: str = ""
     llm_model: str = "gpt-4o"
@@ -34,6 +35,16 @@ class Settings(BaseSettings):
     llm_fallback_model: str = "gpt-4o-mini"
     # 自定义 base_url（留空则按 llm_provider 自动选；填写后覆盖 provider 默认值）
     llm_base_url: str = ""
+
+    # ── LLM 预置 Provider / 模型（选型即填 API Key，URL 已预置）──
+    # 预置模型清单：provider 选中后按此列表选择模型，仅需填 OPENAI_API_KEY。
+    # 列表仅为可选项提示，实际模型名仍以 llm_model / llm_fallback_model 为准，可自定义。
+    llm_model_presets: dict[str, list[str]] = {
+        "openai": ["gpt-4o", "gpt-4o-mini"],
+        "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        "zhipu": ["glm-5.2", "glm-4.5", "glm-4-flash"],
+        "custom": [],
+    }
 
     # ── 上下文 ──
     max_context_tokens: int = 8000

@@ -50,6 +50,47 @@ _DIMENSION_WEIGHTS: dict[ContextDimension, float] = {
     ContextDimension.KNOWLEDGE_BASE: 0.05,
 }
 
+# 静默失败场景专用权重（PRD §12.2 场景 D 优化）
+# 静默失败 = 请求成功但行为未达预期，无异常堆栈可采集，TRACE 维度天然缺失。
+# 此时把 TRACE 的权重重新分配给该场景的核心证据维度：
+#   - SPEC（规范回归）是静默失败最直接的判定证据，权重 0.05 → 0.10
+#   - NETWORK（业务响应异常）次之，0.08 → 0.10
+#   - GIT 归因在无堆栈场景价值有限，0.12 → 0.10
+# 其余维度权重不变，总和仍为 1.0。
+_SILENT_FAILURE_DIMENSION_WEIGHTS: dict[ContextDimension, float] = {
+    ContextDimension.TRACE: 0.15,
+    ContextDimension.CODE_SNIPPET: 0.20,
+    ContextDimension.RUNTIME: 0.10,
+    ContextDimension.GIT_CONTEXT: 0.10,
+    ContextDimension.LLM_ANALYSIS: 0.12,
+    ContextDimension.NETWORK: 0.10,
+    ContextDimension.UI_EVENT: 0.08,
+    ContextDimension.SPEC: 0.10,
+    ContextDimension.KNOWLEDGE_BASE: 0.05,
+}
+
+
+def _is_silent_failure_scenario(debug_ctx: dict[str, Any]) -> bool:
+    """检测静默失败场景：无异常堆栈帧，但存在替代信号。
+
+    静默失败 = 请求返回成功但行为未达预期，无异常堆栈可采集。
+    判定条件：无堆栈帧（exception 为空或 frames 为空/0）且存在替代信号
+    （spec_diffs / network_trace / ui_events 任一非空）。
+    若连替代信号都没有（空上下文），不视为静默失败，避免虚高。
+    """
+    exc = debug_ctx.get("exception")
+    if isinstance(exc, dict):
+        frames = exc.get("frames") or []
+        frame_count = exc.get("frame_count", len(frames))
+        if frame_count > 0:
+            return False  # 有异常堆栈，非静默失败
+    has_signal = bool(
+        debug_ctx.get("spec_diffs")
+        or debug_ctx.get("network_trace")
+        or debug_ctx.get("ui_events")
+    )
+    return has_signal
+
 
 # ── 公共入口 ──
 
@@ -98,7 +139,16 @@ def is_enabled() -> bool:
 def _score_completeness(
     debug_ctx: dict[str, Any], repair_ctx: dict[str, Any]
 ) -> ContextCompleteness:
-    """逐维度评分，加权平均计算整体完整度。"""
+    """逐维度评分，加权平均计算整体完整度。
+
+    权重按场景动态选择：静默失败（无异常堆栈）场景使用专用权重，
+    避免 TRACE 维度权重被浪费，其余场景用默认权重。
+    """
+    weights = (
+        _SILENT_FAILURE_DIMENSION_WEIGHTS
+        if _is_silent_failure_scenario(debug_ctx)
+        else _DIMENSION_WEIGHTS
+    )
     dimensions: dict[ContextDimension, DimensionScore] = {}
     weighted_sum = 0.0
     missing_count = 0
@@ -107,7 +157,7 @@ def _score_completeness(
         scorer = _DIMENSION_SCORERS.get(dim)
         score = scorer(debug_ctx, repair_ctx) if scorer else _score_none(dim)
         dimensions[dim] = score
-        weighted_sum += score.score * _DIMENSION_WEIGHTS.get(dim, 0.0)
+        weighted_sum += score.score * weights.get(dim, 0.0)
         if not score.present:
             missing_count += 1
 

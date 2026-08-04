@@ -1474,7 +1474,7 @@ analyze(context)
 
 | 配置项 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `vector_store_enabled` | bool | False | 是否启用向量检索 RAG |
+| `vector_store_enabled` | bool | True | 是否启用向量检索 RAG（默认开启，in_process 后端零依赖） |
 | `vector_store_backend` | str | "in_process" | 后端名称（注册表 key） |
 | `vector_store_top_k` | int | 3 | 召回条数上限 |
 | `vector_store_min_score` | float | 0.3 | 相似度下限（低于此分数丢弃） |
