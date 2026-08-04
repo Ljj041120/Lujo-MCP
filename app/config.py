@@ -201,7 +201,8 @@ class Settings(BaseSettings):
     # ── 向量检索 RAG（Phase 7）──
     # 全局开关：开启后 LLM 分析前先做向量召回（精确指纹 miss 后的二级 fallback）
     # 抽象落在检索语义 add(docs)/search(query, top_k)，禁止 Qdrant collection/point 概念 leak 进接口
-    vector_store_enabled: bool = False
+    # 默认开启（in_process 后端零依赖，Jaccard 相似度，无外部环境要求）
+    vector_store_enabled: bool = True
     # 向量库后端：in_process（默认，零外部依赖）| qdrant（接入 OpenAI/智谱 Embeddings，语义召回）
     vector_store_backend: str = "in_process"
     # 召回 top_k 数量
