@@ -7,7 +7,7 @@
 > - AI Debug Agent Phase 2 多 Agent DAG（AGENT-002，2026-07-30）：`RepairAgent` + `GitAgent`/`TestAgent`/`SecurityAgent` 并行审查
 > - MCP 工具数增至 17（新增 `repair_async` / `repair_result`）
 > - 测试基线：672 passed / 6 skipped / 0 failed
-> - ⚠️ **beta-release 全量审查（2026-07-27）**：发现 P0×6 + P1×9 + P2×12 + 文档×5 = 32 项，阻断上线和开源。健康度 8.5/10 → 6.5/10。详见内部审计报告
+> - ⚠️ **beta-release 全量审查（2026-07-27）**：发现 P0×6 + P1×9 + P2×12 + 文档×5 = 32 项，阻断上线和开源。健康度 8.5/10 → 6.5/10。详见仓库提交历史与测试报告
 > - 上述增量属于 `v0.3.0` 之后的主干演进，正式版本号以后续发版说明为准
 
 **Version / 版本**: v0.3.0  

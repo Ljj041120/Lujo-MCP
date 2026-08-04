@@ -138,20 +138,32 @@ def _score_trace(debug_ctx: dict[str, Any], _repair_ctx: dict[str, Any]) -> Dime
     return DimensionScore(present=True, score=0.4, reason=f"堆栈过浅，仅 {frame_count} 帧，定位困难")
 
 
-def _score_code_snippet(debug_ctx: dict[str, Any], _repair_ctx: dict[str, Any]) -> DimensionScore:
-    """CODE_SNIPPET 维度：源码片段是否成功采集。"""
+def _score_code_snippet(debug_ctx: dict[str, Any], repair_ctx: dict[str, Any]) -> DimensionScore:
+    """CODE_SNIPPET 维度：源码片段是否成功采集。
+
+    M3 增强：当 code_snippets 为空但 repair_ctx.fault_locations 存在时，
+    说明静态分析已定位到函数级（虽然没有行级源码），给部分分。
+    """
     snippets = debug_ctx.get("code_snippets") or []
-    if not snippets:
-        return DimensionScore(present=False, score=0.0, reason="无源码片段")
-    found = sum(1 for s in snippets if s.get("found"))
-    total = len(snippets)
-    if found == total:
-        return DimensionScore(present=True, score=1.0, reason=f"全部 {total} 帧源码已定位")
-    if found > 0:
+    if snippets:
+        found = sum(1 for s in snippets if s.get("found"))
+        total = len(snippets)
+        if found == total:
+            return DimensionScore(present=True, score=1.0, reason=f"全部 {total} 帧源码已定位")
+        if found > 0:
+            return DimensionScore(
+                present=True, score=0.6, reason=f"{found}/{total} 帧源码已定位，{total - found} 帧未找到"
+            )
+        return DimensionScore(present=False, score=0.0, reason=f"全部 {total} 帧源码均未找到，检查路径映射")
+
+    # M3 fallback：无 code_snippets 但有 fault_locations（静态分析产出）
+    fault_locs = repair_ctx.get("fault_locations") or []
+    if fault_locs:
         return DimensionScore(
-            present=True, score=0.6, reason=f"{found}/{total} 帧源码已定位，{total - found} 帧未找到"
+            present=True, score=0.5,
+            reason=f"静态分析定位 {len(fault_locs)} 个可疑函数（无行级源码）",
         )
-    return DimensionScore(present=False, score=0.0, reason=f"全部 {total} 帧源码均未找到，检查路径映射")
+    return DimensionScore(present=False, score=0.0, reason="无源码片段")
 
 
 def _score_runtime(debug_ctx: dict[str, Any], _repair_ctx: dict[str, Any]) -> DimensionScore:
@@ -221,16 +233,46 @@ def _score_knowledge_base(debug_ctx: dict[str, Any], repair_ctx: dict[str, Any])
 
 
 def _score_llm_analysis(debug_ctx: dict[str, Any], repair_ctx: dict[str, Any]) -> DimensionScore:
-    """LLM_ANALYSIS 维度：先验 LLM 分析是否可用。"""
+    """LLM_ANALYSIS 维度：先验 LLM 分析是否可用。
+
+    M4 增强：识别 case_confidence（float）和 verify_count（int）。
+    - case_confidence >= 0.9 + verify_count >= 2 → 1.0（验证过的结论）
+    - case_confidence >= 0.8 → 基础分 +0.1
+    - verify_count >= 1 → 额外 +0.05
+    """
     prior = repair_ctx.get("prior_analysis") or {}
     if prior and prior.get("root_cause"):
         conf = prior.get("confidence", "low")
         src = prior.get("analysis_source", "unknown")
+        case_conf = float(prior.get("case_confidence", 0.0) or 0.0)
+        verify_count = int(prior.get("verify_count", 0) or 0)
+
+        # 基础分按 confidence 字符串
         if conf == "high":
-            return DimensionScore(present=True, score=1.0, reason=f"LLM 分析完成（置信度 high，来源 {src}）")
-        if conf == "medium":
-            return DimensionScore(present=True, score=0.8, reason=f"LLM 分析完成（置信度 medium，来源 {src}）")
-        return DimensionScore(present=True, score=0.5, reason=f"LLM 分析完成（置信度 low，来源 {src}）")
+            base = 1.0
+        elif conf == "medium":
+            base = 0.8
+        else:
+            base = 0.5
+
+        # M4 加成：case_confidence 高 → 提升
+        if case_conf >= 0.9:
+            base = min(1.0, base + 0.1)
+        elif case_conf >= 0.8:
+            base = min(1.0, base + 0.05)
+
+        # M4 加成：verify_count > 0 → 经验证的结论更可信
+        if verify_count >= 2:
+            base = min(1.0, base + 0.05)
+        elif verify_count >= 1:
+            base = min(1.0, base + 0.03)
+
+        verify_note = f"，verify_count={verify_count}" if verify_count > 0 else ""
+        conf_note = f"，case_conf={case_conf:.2f}" if case_conf > 0 else ""
+        return DimensionScore(
+            present=True, score=round(base, 4),
+            reason=f"LLM 分析完成（置信度 {conf}，来源 {src}{conf_note}{verify_note}）",
+        )
     return DimensionScore(present=False, score=0.0, reason="LLM 先验分析不可用（未启用或调用失败）")
 
 
@@ -414,6 +456,29 @@ def _extract_evidence(
             )
         )
 
+    # 10. M3 静态分析证据（fault_locations）
+    fault_locs = repair_ctx.get("fault_locations") or []
+    for loc in fault_locs:
+        if isinstance(loc, dict):
+            analyzer = loc.get("analyzer", "static_analyzer")
+            func = loc.get("function", "?")
+            file = loc.get("file", "?")
+            line = loc.get("line", "?")
+            evidence.append(
+                EvidenceItem(
+                    type=EvidenceType.CODE_SNIPPET,
+                    description=f"静态分析定位：{func}() at {file}:{line}（{analyzer}）",
+                    source=analyzer,
+                    relevance=RelevanceLevel.HIGH,
+                    location=f"{file}:{line}",
+                    detail={
+                        "signature": loc.get("signature", ""),
+                        "complexity": loc.get("complexity"),
+                        "suspicious_inputs": loc.get("suspicious_inputs", []),
+                    },
+                )
+            )
+
     return evidence
 
 
@@ -438,11 +503,9 @@ def _score_confidence(
     # 基础分（0-0.5）：5 条以上证据即满分
     base = min(total / 5.0, 1.0) * 0.5
 
-    # 质量加成（0-0.3）：高相关度证据占比
-    if total > 0:
-        quality = (high_count / total) * 0.3
-    else:
-        quality = 0.0
+    # 质量加成（0-0.3）：高相关度证据数量（非占比，避免添加中等证据稀释分数）
+    # 5 条高相关证据即满分；3 条 = 0.18；1 条 = 0.06
+    quality = min(high_count / 5.0, 1.0) * 0.3
 
     # 覆盖度加成（0-0.2）：已覆盖的维度数
     covered = _count_covered_dimensions(evidence_items)

@@ -1063,7 +1063,7 @@ DEBUG=true    # 仅开发环境！
 
 1. 查阅 [发布说明 / Release Notes](./RELEASE_NOTES.md) 了解版本变更
 2. 查阅 [启动前检查清单 / Pre-flight Checklist](./PREFLIGHT_CHECKLIST.md) 全面检查环境
-3. 查阅内部文档了解功能详情与已知问题
+3. 查阅仓库代码与测试用例了解功能详情与已知问题
 
 ---
 

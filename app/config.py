@@ -262,6 +262,25 @@ class Settings(BaseSettings):
     # 不阻断最终输出聚合（仍静默降级），仅作为调用方可观测信号
     agent_dag_failure_threshold: int = 2
 
+    # ── M4 Agent Verify Loop（迭代修复 + 验证 + 知识库记忆）──
+    # 开启后 Coordinator 会在 Phase 2 DAG 外层加迭代（repair → review → verify → KB 写回）
+    # 需要先保证 agent_multi_agent_enabled=True，否则 Verify Loop 无法生效
+    agent_verify_loop_enabled: bool = False
+    # 最大迭代轮数（默认 3，最多 5，过大可能导致 Token 消耗显著提升）
+    agent_verify_loop_max_iterations: int = 3
+    # 迭代判定阈值（passed）：verify.overall_score ≥ pass 且 审查双 pass 且 test 可用
+    # 注：overall_score ∈ [0,1]，默认 0.7 对应"中等丰富度的验证策略 + 审查通过"
+    agent_verify_loop_pass_threshold: float = 0.7
+    # 迭代判定阈值（高置信度 repair 无 test 时 passed）：review 双 pass + repair.confidence>=medium
+    # + overall_score >= 该值
+    agent_verify_loop_high_confidence_pass_threshold: float = 0.85
+    # 迭代判定阈值（partial）：overall_score >= 该值但未达 pass 阈值 → 下轮迭代继续
+    agent_verify_loop_partial_threshold: float = 0.3
+    # 写回 KnowledgeBase 开关：迭代有效（verdict passed/partial/rejected）时，
+    # 对 DebugCase.verify_count / case_confidence 做增量（Δ +0.05/+0.02/-0.05）
+    # 关闭时 Verify Loop 仅做迭代判定，不做 KB 沉淀
+    agent_verify_loop_kb_writeback_enabled: bool = True
+
     # ── Dashboard 实时 SSE 推送（DASH-SSE-001）──
     # 启用后 /api/dashboard/stream 提供 SSE 通道，trace/error 写入时广播变更信号，
     # 前端 EventSource 收到后即时 re-fetch（叠加在 10s 轮询之上，轮询仍作兜底）。
@@ -273,6 +292,25 @@ class Settings(BaseSettings):
     # 全局开关：开启后 QualityScorer 在 build_debug_context() 返回前评分并注入 QualityReport
     # 关闭时 scorer 不执行，零行为变更（向后兼容）
     quality_scoring_enabled: bool = True
+
+    # ── Debug Case Schema + 种子知识（v0.4.0 M2）──
+    # 启动期自动加载 30 条种子知识到 KnowledgeBaseStore（merge 模式，已存在则跳过）
+    # 关闭时知识库启动为空，KnowledgeBase 维度评分维持 0.0
+    kb_seed_autoload_enabled: bool = True
+
+    # ── 知识库准确度提升（v0.4.0 M3 Fault Localization 阶段并行优化）──
+    # KB ↔ vector_store 双写同步。关闭时 KB 写入不更新向量索引，L2 召回退化（旧行为）
+    kb_vector_index_autosync: bool = True
+    # 种子匹配三级 fallback 中"归一化指纹 + 类型级粗召回"开关
+    kb_type_level_fallback: bool = True
+    # 类型级粗召回 Jaccard 最低分（0~1），分数低于此阈值的 type-level match 判定为 miss
+    kb_seed_jaccard_min_score: float = 0.25
+
+    # ── Fault Localization 2.0（v0.4.0 M3）──
+    # function-level 静态分析开关：开启后 RepairContextAssembler 调用 StaticAnalyzer
+    # - 有堆栈帧：对前 N 帧函数提取签名/复杂度/可疑输入
+    # - 无堆栈帧：URL→handler 反查定位源码后静态分析
+    static_analysis_enabled: bool = True
 
     # ── Agent Verify Loop（v0.4.0 M4）──
     # 迭代修复模式开关：开启后 Coordinator 按 DAG 迭代修复（修复→审查→验证→重试，最多 N 轮）

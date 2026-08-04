@@ -1,8 +1,8 @@
-﻿# Lujo-MCP 项目摘要
+# Lujo-MCP 项目摘要
 
 > AI Agent 第一入口文件。任何 AI 进入项目请先读本文件，3 分钟理解项目全貌。
 
-> 项目功能完成度、待开发项、稳定性验证状态以内部文档为准（不对外公开）。
+> 项目功能完成度、待开发项、稳定性验证状态以仓库代码与测试用例实情为准。
 
 ---
 
@@ -251,7 +251,7 @@
 | 2 | DESIGN.md | 理解技术设计 |
 | 3 | PRD.md | 理解产品需求 |
 
-> 开发规则、当前状态、开发计划、长期路线图等内部文档不对外公开，AI Agent 可通过本地文件系统访问 `docs/internal/` 目录。
+> 开发规则、当前状态、开发计划、长期路线图等仅用于本地开发参考，不随仓库公开发布。
 
 ---
 
@@ -327,6 +327,6 @@ python -m app.mcp_server
 
 > **新增安全能力（2026-07-25，AUDIT-2-13/14）**：RBAC 三级角色分级（admin > developer > viewer）覆盖 33 条 REST 路由 + 17 个 MCP 工具；`require_role(*roles)` FastAPI 依赖工厂路由级门控 + `TOOL_ROLE_REQUIREMENTS` MCP 工具级门控；未命中映射默认 viewer（fail-closed）。多 key 恒定时间比较（`verify_api_key` 遍历不短路 + `hmac.compare_digest`）+ 单 key 向后兼容。LFI 路径白名单 + SSRF URL 白名单已上线。
 
-> 整改追踪见内部审计报告。修任一项须回填状态 + `文件:行` 验证。
+> 整改追踪见仓库提交历史与测试用例。修任一项须回填状态 + `文件:行` 验证。
 
 **P0 修复后的行为变更（AI 须知）**：① 0.0.0.0+空 `API_KEY` 现会拒绝启动（本地免鉴权用 `HOST=127.0.0.1`）；② 代码/Git 定位默认仅限进程 CWD，读 CWD 外源码需配 `WHITELIST_PATH_PREFIX`/`GIT_PATH_WHITELIST`；③ `verify_ui`/`auto_test` 默认拒私网/元数据/`file://`，本地联调设 `UI_URL_ALLOW_PRIVATE=true`；④ 工具调用受 `TOOL_TIMEOUT_SECONDS`（默认 60s）约束。P1（SEC-04/06/07/08/09）与 P2（SEC-13/M7）已修复。
