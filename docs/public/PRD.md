@@ -33,6 +33,7 @@
 | v5.5 | 2026-07-30 | 高级架构师 | **Dashboard 实时 SSE 推送交付（`DASH-SSE-001`）**：新增 `app/api/dashboard_events.py`——`DashboardEventBus` 广播总线（无 session 门槛，跨线程 `call_soon_threadsafe` 投递，队列满丢旧保最新）；`dashboard.py` 新增 `GET /api/dashboard/stream` SSE 端点（15s 心跳 + close 事件终止）+ `invalidate_cache` 内挂广播钩子（广播失败静默降级，不影响主写入链路）；`dashboard.html` 前端 EventSource 集成（去抖 refresh + 10s 轮询兜底 + 断线 5s 重连）；`dashboard_sse_enabled=False` 默认关闭（向后兼容零开销）；鉴权复用 `?api_key=` query 降级（EventSource 无法设自定义 header）。新增 FR20 + 18 单测（测试基线 583→654 passed / 6 skipped / 0 failed）；ruff 0 违规。 |
 | v5.6 | 2026-08-03 | 架构委员会 | **v0.4.0 开发路线制定 + M1 Quality Foundation 交付**：(1) 架构委员会四轮评审（代码审计 / 技术架构 / 产品战略 / 开发路线），判定项目当前为「Beta 偏 Demo」，v0.4.0 唯一核心目标为「让 Debug Context 价值可量化、可证明」；(2) 制定 17 个任务、5 个 Milestone 的执行计划（M1 Quality System → M2 Debug Case Schema → M3 Fault Localization 2.0 → M4 Agent Verify Loop → M5 全量回归）；(3) M1 全部 6 个 Task 落地——`app/quality/` 模块（schemas + scorer 规则引擎，9 维度加权评分 + 证据提取 + 改进建议）、`context_assembler.py` 质量注入、`analyzer.py` LLM 增强（reasoning_chain + evidence_items）、Dashboard 质量报告卡片 + `/api/dashboard/trace/{tid}/quality` 独立端点；M3 Task 12（StaticAnalyzer，基于 `ast` 标准库函数级静态分析）同步落地；(4) 5 场景评分基线建立（平均综合 0.45），M2-M4 评分提升预期推演完成（平均 0.45→0.65）。详见 §12.2、DESIGN.md §19。测试基线 764 passed / 6 skipped / 0 failed。 |
 | v5.7 | 2026-08-04 | 架构委员会 | **v0.4.0 M2-M4 全部交付**：(1) **M2 Debug Case Schema**——`app/rag/debug_case.py` 新增 `case_confidence`/`verify_count` 字段 + `compute_type_fingerprint` + `normalize_message_for_similarity`；`KnowledgeBaseStore` 双写同步（`_sync_entry_to_vector_store` / `_sync_all_to_vector_store`）；三级 fallback 匹配（精确指纹→归一化指纹→类型级 Jaccard 相似匹配）；30 条种子知识 + 导入/导出。(2) **M3 Fault Localization 2.0**——`StaticAnalyzer` 增强（`analyze_source_code`/`analyze_handler` 支持无堆栈场景）；`URLResolver` 通过 HTTP 方法+路径反查 FastAPI 路由表；KB↔向量索引自动同步。(3) **M4 Agent Verify Loop**——`VerifyRecord`/`IterationResult`/`LoopState` 数据模型；Coordinator 三层开关调度（Phase1 → Phase2 → M4 Loop）；`_compute_verify_record` 合成 Test/Git/Security 信号；`_compute_iteration_verdict` 四级判定（passed/partial/rejected/skipped）；`_persist_kb_verify` 写回 KB `verify_count`/`case_confidence` 递增。M4 评分对比：5 场景平均质量分 0.48→0.67（达标除场景 D 差 0.05）。新增 38 单测（`test_verify_loop.py`）；测试基线 764 passed / 6 skipped / 0 failed。详见 §12.2、DESIGN.md §19。 |
+| v5.8 | 2026-08-04 | 架构委员会 | **v0.4.0 M5 全量回归测试 + 文档同步交付**：(1) M3 新增 48 单测（`test_static_analyzer.py` 18 项 + `test_url_resolver.py` 16 项 + `test_context_assembler.py` 静态分析集成 3 项 + `test_knowledge_base.py` 三级 fallback/双写同步 11 项），覆盖 6 个知识库准确度验证场景（精确指纹/归一化指纹/类型级 Jaccard/向量双写/种子向量召回/无堆栈 URL 反查+静态分析）；(2) 修复 3 个真实 bug（`_route_matches` 通配符转义、`analyzer.py` `get_knowledge_base` 未导入、`analyze_source_code` 无堆栈场景按名扫描）；(3) 全量单元回归 857 passed / 6 skipped / 0 failed，文档链接检查 110 链接 0 错误；(4) 同步 README/PROJECT_SUMMARY/CHANGELOG/RELEASE_NOTES/DESIGN 测试基线至 857。测试基线 764→857 passed / 6 skipped / 0 failed。 |
 
 ---
 
@@ -591,7 +592,7 @@ HTTP 传输侧（`register_all_tools()` 注册表）与 stdio 传输共用同一
 | M2-debug-case-schema | Debug Case 标准 Schema + 30 条种子知识 + 知识库导入/导出 | 3-4 周 | ✅ 已完成（2026-08-04） |
 | M3-fault-localization | 函数级静态分析（基于 Python `ast` 标准库，零依赖） | 3-4 周 | ✅ 已完成（2026-08-04） |
 | M4-agent-verify-loop | Agent Verify Loop（迭代修复 + 验证 + 记忆沉淀） | 3-4 周 | ✅ 已完成（2026-08-04） |
-| M5-full-regression | 全量回归测试 + 文档更新 | 2 周 | 待启动 |
+| M5-full-regression | 全量回归测试 + 文档更新 | 2 周 | ✅ 已完成（2026-08-04） |
 
 #### M1 评分基线（5 场景对比）
 

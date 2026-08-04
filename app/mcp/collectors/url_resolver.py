@@ -96,7 +96,16 @@ def _route_matches(route_path_template: str, request_path: str) -> bool:
 
     例："/api/users/{user_id}" 匹配 "/api/users/123"。
     """
-    pattern = "^" + _PATH_PARAM_RE.sub(r"[^/]+", re.escape(route_path_template)) + "$"
+    # 先按 {param} 分段，字面段 escape、参数段替换为 [^/]+
+    # （不能在 re.escape 之后替换 {param}，否则 { } 会被转义导致无法匹配）
+    parts = _PATH_PARAM_RE.split(route_path_template)
+    pattern = ""
+    for i, part in enumerate(parts):
+        if i % 2 == 0:
+            pattern += re.escape(part)
+        else:
+            pattern += r"[^/]+"
+    pattern = "^" + pattern + "$"
     return bool(re.match(pattern, request_path))
 
 

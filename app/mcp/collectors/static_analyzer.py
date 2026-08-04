@@ -133,19 +133,28 @@ def analyze_source_code(
         logger.warning("StaticAnalyzer: analyze_source_code 语法错误")
         return None
 
-    func_info = _extract_function_info(tree, function_name, 1, source_code)
+    # 按函数名全文件扫描（无堆栈场景没有精确行号，不能按行号匹配）
+    visitor = _FunctionNameOnlyVisitor(function_name)
+    visitor.visit(tree)
+    if not visitor.candidates:
+        return None
+    func_node = visitor.candidates[0]
+    func_info = visitor.builder_info.get(id(func_node))
+    if func_info is None:
+        builder = _FunctionBuilderVisitor()
+        builder.visit(func_node)
+        func_info = builder.result
     if func_info is None:
         return None
 
     func_info.file = file_hint or "<source>"
 
     suspicious = _infer_suspicious_inputs(func_info, source_code)
-    line_start = func_info.line_start
 
     loc = FaultLocation(
         file=func_info.file,
         function=function_name,
-        line_number=line_start,
+        line_number=func_node.lineno,
         function_info=func_info,
         suspicious_inputs=suspicious,
     )
