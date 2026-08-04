@@ -157,7 +157,7 @@
 - ✅ scripts/ 目录（run_tests.sh / lint.sh / init_db.sh）
 - ✅ migrations/ 目录（6 个 SQL 文件）
 - ✅ GitHub Actions CI
-- ✅ 测试基线：以 `pytest` 实际执行结果为准；当前 **764 passed / 6 skipped / 0 failed**（含 AI Debug Agent Phase 1 新增 63 项 + Phase 2 新增 53 项 + Dashboard SSE 18 项 + Quality System 86 项 + Verify Loop 38 项 + Dashboard 质量报告 6 项）
+- ✅ 测试基线：以 `pytest` 实际执行结果为准；当前 **857 passed / 6 skipped / 0 failed**（含 AI Debug Agent Phase 1 新增 63 项 + Phase 2 新增 53 项 + Dashboard SSE 18 项 + Quality System 86 项 + Verify Loop 38 项 + Dashboard 质量报告 6 项 + M3 Fault Localization 2.0 新增 48 项）
 
 ### v0.4.0 Quality System + Agent Verify Loop ✅（2026-08-04）
 
@@ -212,7 +212,7 @@
 - v0.4.0 M3 Fault Localization 2.0：`StaticAnalyzer` 增强（无堆栈场景 `analyze_source_code`/`analyze_handler`）+ `URLResolver`（HTTP 方法+路径反查 FastAPI 路由表）+ KB↔向量索引自动同步 ✅（2026-08-04）
 - v0.4.0 M4 Agent Verify Loop：`VerifyRecord`/`IterationResult`/`LoopState` + Coordinator 三层开关调度 + 四级判定（passed/partial/rejected/skipped）+ KB 写回 `verify_count`/`case_confidence` 递增 ✅（2026-08-04）
 
-**测试提示**：全仓测试基线请以仓库内最新 `pytest` 实际执行结果为准；当前 **764 passed / 6 skipped / 0 failed**（含 AI Debug Agent Phase 1 新增 63 项 + Phase 2 新增 53 项 + Dashboard SSE 18 项 + Quality System 86 项 + Verify Loop 38 项 + Dashboard 质量报告 6 项）。
+**测试提示**：全仓测试基线请以仓库内最新 `pytest` 实际执行结果为准；当前 **857 passed / 6 skipped / 0 failed**（含 AI Debug Agent Phase 1 新增 63 项 + Phase 2 新增 53 项 + Dashboard SSE 18 项 + Quality System 86 项 + Verify Loop 38 项 + Dashboard 质量报告 6 项 + M3 Fault Localization 2.0 新增 48 项）。
 
 **当前优先级**：
 

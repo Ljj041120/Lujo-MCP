@@ -7,7 +7,7 @@
 
 ## [Unreleased] - 2026-08-04
 
-> v0.4.0 开发中。M1 Quality Foundation ✅ / M2 Debug Case Schema + 种子知识 ✅ / M3 Fault Localization 2.0 + KB 准确度提升 ✅ / M4 Agent Verify Loop ✅ 已完成。M5 待启动。
+> v0.4.0 开发中。M1 Quality Foundation ✅ / M2 Debug Case Schema + 种子知识 ✅ / M3 Fault Localization 2.0 + KB 准确度提升 ✅ / M4 Agent Verify Loop ✅ / M5 全量回归测试 + 文档同步 ✅ 已完成。
 
 ### 新增
 
@@ -30,7 +30,7 @@
   - `GET /api/dashboard/trace/{tid}/quality` 独立端点
   - `get_trace_detail` 注入 `quality_report` 字段
   - 前端 Quality 卡片：综合评分进度条 + 9 维度网格 + 证据列表 + 改进建议
-- **测试**（`tests/unit/test_quality.py`）：86 个用例覆盖 19 个测试类；`tests/unit/test_verify_loop.py`：38 个用例覆盖 VerifyRecord/verdict/score/KB 写回/三层开关；`tests/unit/test_dashboard.py` 新增 6 个质量报告测试用例
+- **测试**（`tests/unit/test_quality.py`）：86 个用例覆盖 19 个测试类；`tests/unit/test_verify_loop.py`：38 个用例覆盖 VerifyRecord/verdict/score/KB 写回/三层开关；`tests/unit/test_dashboard.py` 新增 6 个质量报告测试用例；M3 新增 `test_static_analyzer.py`（18 例）+ `test_url_resolver.py`（16 例）+ `test_context_assembler.py` 静态分析集成（3 例）+ `test_knowledge_base.py` 三级 fallback/向量双写（11 例）
 
 #### 文档
 
@@ -63,7 +63,7 @@
 
 - **PRD.md**：修订记录新增 v5.6（v0.4.0 开发路线制定 + M1 Quality Foundation 交付）
 
-> 测试基线：764 passed, 6 skipped, 0 failed
+> 测试基线：857 passed, 6 skipped, 0 failed
 
 ---
 

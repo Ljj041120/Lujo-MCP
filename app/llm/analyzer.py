@@ -740,6 +740,7 @@ def _try_type_level_seed_match(
         min_score = 0.25
 
     from app.rag.debug_case import DebugCase
+    from app.rag.knowledge_base import get_knowledge_base  # 局部导入，避免循环依赖
     from app.rag.vector_store import _tokenize  # 复用同一分词器
 
     kb_entries = get_knowledge_base().export_all()
