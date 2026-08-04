@@ -29,6 +29,7 @@ _EMBED_BATCH_SIZE = 2048
 # provider → 默认 base_url（与 analyzer._PROVIDER_BASE_URLS 保持一致，复制以避免循环 import）
 _PROVIDER_BASE_URLS = {
     "openai": "",
+    "deepseek": "https://api.deepseek.com/v1",
     "zhipu": "https://open.bigmodel.cn/api/paas/v4/",
     "custom": "",
 }

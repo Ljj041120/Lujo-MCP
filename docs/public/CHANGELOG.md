@@ -31,6 +31,11 @@
   - `get_trace_detail` 注入 `quality_report` 字段
   - 前端 Quality 卡片：综合评分进度条 + 9 维度网格 + 证据列表 + 改进建议
 - **测试**（`tests/unit/test_quality.py`）：86 个用例覆盖 19 个测试类；`tests/unit/test_verify_loop.py`：38 个用例覆盖 VerifyRecord/verdict/score/KB 写回/三层开关；`tests/unit/test_dashboard.py` 新增 6 个质量报告测试用例；M3 新增 `test_static_analyzer.py`（18 例）+ `test_url_resolver.py`（16 例）+ `test_context_assembler.py` 静态分析集成（3 例）+ `test_knowledge_base.py` 三级 fallback/向量双写（11 例）
+- **LLM Verify Loop 配置 + DeepSeek 支持**（`app/config.py` + `app/llm/analyzer.py` + `app/rag/qdrant_vector_store.py`）
+  - `_PROVIDER_BASE_URLS` 新增 `deepseek` → `https://api.deepseek.com/v1`（analyzer 与 qdrant 同步更新）
+  - `llm_model_presets` 预置模型映射：openai（gpt-4o/-mini）/ deepseek（deepseek-v4-flash/-pro）/ zhipu（glm-5.2/glm-4.5/glm-4-flash）
+  - 选型即填 `OPENAI_API_KEY`，`LLM_BASE_URL` 留空自动按 provider 选择；`custom` 支持任意 OpenAI 兼容端点
+  - `.env.example` 新增 Agent/Verify Loop 三级开关说明（agent_enabled → agent_multi_agent_enabled → agent_verify_loop_enabled）
 
 #### 文档
 
@@ -52,6 +57,7 @@
 - **_persist_kb_verify from_kb_entry 调用 bug**：手动构造 dict 与 `from_kb_entry` 期望的 KB entry 格式不匹配；修复为直接传 entry
 - **best_iteration 逻辑 bug**：`repair_plan=None` 时 `best_iteration` 被错误更新；增加 `repair_plan is not None` 前置条件
 - **可信度公式 bug**：旧 `(high/total)*0.3` 导致添加 MEDIUM 证据稀释高相关度占比；改为 `min(high/5, 1.0)*0.3` 绝对值计数
+- **静默失败场景评分偏低**（PRD §12.2 场景 D）：无异常堆栈导致 TRACE 维度（权重 0.20）天然得分 0；新增 `_SILENT_FAILURE_DIMENSION_WEIGHTS` 专用权重表 + `_is_silent_failure_scenario` 场景判定，将 TRACE 权重重分配给 SPEC（0.05→0.10）与 NETWORK（0.08→0.10），场景 D 综合评分 0.56→0.62，满足 PRD 预期
 
 #### 文档
 
